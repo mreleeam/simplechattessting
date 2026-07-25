@@ -1,0 +1,62 @@
+:root {
+  --background-color: #000;
+  --font-color: #e8e9ed;
+  --invert-font-color: #000;
+
+  --primary-color: #62c4ff;
+  --secondary-color: #7d8590;
+
+  --code-bg-color: #111;
+  --block-background-color: #111;
+}
+
+html,
+body {
+  background: var(--background-color);
+  color: var(--font-color);
+  min-height: 100vh;
+}
+
+/* ===== Hero ===== */
+
+.hero-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  margin-top: 3rem;
+  margin-bottom: 2rem;
+}
+
+.terminal-title {
+  margin: 0;
+
+  font-size: 25px !important;
+  font-weight: 900;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+
+  color: #5fd7ff;
+
+  text-shadow:
+    0 0 5px #5fd7ff,
+    0 0 10px #5fd7ff,
+    0 0 20px #00bfff,
+    0 0 40px #00bfff,
+    0 0 80px #00bfff;
+}
+
+.cursor {
+  display: inline-block;
+  margin-left: 0.15em;
+
+  color: #5fd7ff;
+
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
