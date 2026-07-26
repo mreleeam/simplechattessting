@@ -6,7 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <title>{% block title %}Secure Chat{% endblock %}</title>
-
+    <link rel="stylesheet" href="{% static 'css/vendor/alertify.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/vendor/semantic.min.css' %}"> 
     <link rel="stylesheet" href="{% static 'css/vendor/terminal.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
@@ -14,6 +15,27 @@
 
 {% block content %}
 {% endblock %}
+
+<script src="{% static 'js/vendor/jquery-3.7.1.min.js' %}"></script>
+<script src="{% static 'js/vendor/alertify.min.js' %}"></script>
+
+<script>
+{% if messages %}
+    {% for message in messages %}
+
+        {% if message.tags == "success" %}
+            alertify.success("{{ message }}");
+        {% elif message.tags == "error" %}
+            alertify.error("{{ message }}");
+        {% elif message.tags == "warning" %}
+            alertify.warning("{{ message }}");
+        {% else %}
+            alertify.message("{{ message }}");
+        {% endif %}
+
+    {% endfor %}
+{% endif %}
+</script>
 
 </body>
 </html>

@@ -1,0 +1,43 @@
+<div class="home-panel">
+
+  <div class="button-group">
+    <a href="login/" class="btn btn-default">LOGIN</a>
+    <a href="register/" class="btn btn-default">REGISTER</a>
+  </div>
+
+  <div class="terminal-card">
+
+    <p>
+
+      <span class="status-label">
+        USER STATUS
+      </span>
+
+      &gt;
+
+      {% if request.user.is_authenticated %}
+
+      <span class="status-connected">
+        CONNECTED
+      </span>
+
+      {% else %}
+
+      <span class="status-disconnected">
+        NOT CONNECTED
+      </span>
+
+      {% endif %}
+
+    </p>
+
+    <br>
+
+    <p>✓ Privacy-first design</p>
+    <p>✓ Text-only communication</p>
+    <p>✓ Minimal attack surface</p>
+    <p>✓ Open source</p>
+
+  </div>
+
+</div>

@@ -24,14 +24,14 @@ body {
   justify-content: center;
   align-items: center;
 
-  margin-top: 3rem;
-  margin-bottom: 2rem;
+  margin-top: 5rem;
+  margin-bottom: 5rem;
 }
 
 .terminal-title {
   margin: 0;
 
-  font-size: 25px !important;
+  font-size: 50px !important;
   font-weight: 900;
   letter-spacing: 0.20em;
   text-transform: uppercase;
@@ -59,4 +59,153 @@ body {
   50% {
     opacity: 0;
   }
+}
+
+.home-panel {
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  margin-top: 5rem;
+}
+
+.button-group {
+
+  display: flex;
+  gap: 2rem;
+
+  margin-bottom: 7rem;
+}
+
+.terminal-card {
+
+  text-align: center;
+
+  width: 800px;
+  max-width: 90%;
+
+  border: 1px solid var(--primary-color);
+
+  padding: 2rem;
+
+  background: rgba(255, 255, 255, .02);
+}
+
+.terminal-card p {
+
+  margin: .6rem 0;
+
+  font-size: 1.1rem;
+}
+
+.status-label {
+
+  color: #b5b5b5;
+
+  font-size: 1.5rem;
+
+  font-weight: bold;
+
+  letter-spacing: .1em;
+}
+
+.status-connected {
+
+  color: #4dff88;
+
+  font-size: 1.5rem;
+
+  font-weight: bold;
+
+  text-shadow:
+    0 0 5px #4dff88,
+    0 0 10px #4dff88,
+    0 0 20px #4dff88,
+    0 0 40px #00ff80;
+}
+
+.status-disconnected {
+
+  color: #ff4d6d;
+
+  font-size: 1.5rem;
+
+  font-weight: bold;
+
+  text-shadow:
+    0 0 5px #ff4d6d,
+    0 0 10px #ff4d6d,
+    0 0 20px #ff4d6d,
+    0 0 40px #ff1744;
+}
+
+.auth-box {
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  margin-top: 8vh;
+}
+
+
+.auth-box form {
+
+  margin-top: 7rem;
+
+  display: flex;
+  flex-direction: column;
+
+  width: 450px;
+
+  gap: 1rem;
+}
+
+
+.auth-box input {
+
+  background: black;
+
+  border: 1px solid #5fd7ff;
+
+  color: white;
+
+  padding: 1rem;
+
+  font-family: inherit;
+
+  font-size: 1.2rem;
+}
+
+
+.auth-box button {
+
+  padding: 1rem;
+
+  background: #5fd7ff;
+
+  border: none;
+
+  font-size: 1.2rem;
+
+  cursor: pointer;
+}
+
+.register-rules {
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+
+  width: 100%;
+
+  font-size: 0.95rem;
+}
+
+.register-rules ul {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.register-rules li {
+  margin: 0.4rem 0;
 }

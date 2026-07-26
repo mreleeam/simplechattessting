@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}
+Register
+{% endblock %}
+
+{% block content %}
+
+<div class="auth-box">
+
+    <h1 class="terminal-title">
+        REGISTER...<span class="cursor">|</span>
+    </h1>
+
+    <form method="post">
+
+        {% csrf_token %}
+
+        <input
+            type="text"
+            name="username"
+            placeholder="Username"
+            required
+        >
+
+        <input
+            type="password"
+            name="password"
+            placeholder="Password"
+            required
+        >
+
+        <input
+            type="password"
+            name="confirm_password"
+            placeholder="Confirm Password"
+            required
+        >
+
+        <button type="submit">
+            CREATE ACCOUNT
+        </button>
+        
+        <fieldset class="register-rules">
+
+          <legend>Username Rules</legend>
+
+          <ul>
+            <li>3–32 characters</li>
+            <li>Lowercase letters only (a-z)</li>
+            <li>May contain <strong>.</strong>, <strong>_</strong>, and <strong>-</strong></li>
+          </ul>
+
+        </fieldset>
+
+
+        <p class="auth-link">
+            Already have an account?
+            <a href="{% url 'login' %}">
+                Login!
+            </a>
+        </p>
+
+    </form>
+
+</div>
+
+{% endblock %}
