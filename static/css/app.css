@@ -17,7 +17,6 @@ body {
   min-height: 100vh;
 }
 
-/* ===== Hero ===== */
 
 .hero-header {
   display: flex;
@@ -29,6 +28,7 @@ body {
 }
 
 .terminal-title {
+  text-align: center;
   margin: 0;
 
   font-size: 50px !important;
@@ -208,4 +208,100 @@ body {
 
 .register-rules li {
   margin: 0.4rem 0;
+}
+
+
+.account-card {
+
+  width: 850px;
+  margin: 4rem auto;
+  align-items: center;
+}
+
+
+.account-info {
+
+  width: fit-content;
+
+  margin: 0 auto;
+
+  font-size: 1.4rem;
+
+  line-height: 2.2;
+
+  margin-top: 5rem;
+}
+
+.account-info p {
+
+  margin: .8rem 0;
+}
+
+.account-label {
+
+  display: inline-block;
+
+  width: 180px;
+}
+
+.account-separator {
+
+  display: inline-block;
+
+  width: 25px;
+
+  text-align: center;
+}
+
+.hidden-form {
+
+  display: none;
+
+  margin-top: 2rem;
+}
+
+.hidden-form input {
+
+  width: 320px;
+
+  margin: .8rem auto;
+
+  display: block;
+}
+
+.chat-card {
+  align-items: center;
+  max-width: 850px;
+  margin: 0 auto;
+}
+
+.chat-info {
+  margin: .5rem 0;
+  margin-top: 5rem;
+  font-size: 1.2rem;
+}
+
+.chat-label {
+  display: inline-block;
+  width: 140px;
+  font-weight: bold;
+}
+
+.chat-separator {
+  display: inline-block;
+  width: 20px;
+}
+
+.room-link {
+  display: block;
+  color: #62c4ff;
+  text-decoration: none;
+  padding: .35rem 0;
+  transition: .2s;
+  font-size: 1.2rem;
+}
+
+.room-link:hover {
+  padding-left: .75rem;
+  text-shadow: 0 0 10px #62c4ff;
 }

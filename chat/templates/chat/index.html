@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}
+Chat
+{% endblock %}
+
+{% block content %}
+
+<div class="chat-card">
+
+    <h1 class="terminal-title">
+        CHAT...<span class="cursor">|</span>
+    </h1>
+
+    <div class="chat-info">
+
+        <p>
+            <span class="chat-label">Username</span>
+            <span class="chat-separator">&gt;</span>
+            <span>{{ request.user.username }}</span>
+        </p>
+
+        <p>
+            <span class="chat-label">Status</span>
+            <span class="chat-separator">&gt;</span>
+            <span class="status-connected">CONNECTED</span>
+        </p>
+
+    </div>
+
+    <hr>
+
+    <h3>ROOMS</h3>
+
+    <div class="room-list">
+
+        {% for room in rooms %}
+
+        <p>
+            <a class="room-link"
+               href="{% url 'chat:room' room.name %}">
+                &gt; #{{ room.name }}
+            </a>
+        </p>
+
+        {% empty %}
+
+        <p>No rooms available.</p>
+
+        {% endfor %}
+
+    </div>
+
+    <hr>
+
+    <h3>DIRECT MESSAGES</h3>
+
+    <p class="text-muted">
+        No conversations.
+    </p>
+
+</div>
+
+{% endblock %}

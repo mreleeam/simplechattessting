@@ -4,6 +4,11 @@ from django.contrib.auth.models import User
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import logout
+from django.views.decorators.http import require_POST
+
 
 RESERVED_USERNAMES = {
     "admin",
@@ -93,3 +98,89 @@ def register_view(request):
         return redirect("login")
 
     return render(request, "accounts/register.html")
+
+
+@login_required(login_url="login")
+def account_view(request):
+
+    return render(
+        request,
+        "accounts/account.html",
+        {
+            "title": "Account",
+            "user": request.user,
+        },
+    )
+
+
+@login_required(login_url="login")
+def change_password_view(request):
+
+    if request.method == "POST":
+        current_password = request.POST.get("current_password")
+        new_password = request.POST.get("new_password")
+        confirm_password = request.POST.get("confirm_password")
+
+        if not request.user.check_password(current_password):
+            messages.error(request, "Current password is incorrect.")
+            return redirect("account")
+
+        if len(new_password) < 8:
+            messages.error(request, "Password must be at least 8 characters.")
+            return redirect("account")
+
+        if new_password != confirm_password:
+            messages.error(request, "Passwords do not match.")
+            return redirect("account")
+
+        request.user.set_password(new_password)
+        request.user.save()
+
+        update_session_auth_hash(request, request.user)
+
+        messages.success(request, "Password changed successfully.")
+
+        return redirect("account")
+
+    return redirect("account")
+
+
+@login_required(login_url="login")
+@require_POST
+@login_required(login_url="login")
+def logout_view(request):
+
+    logout(request)
+
+    messages.success(request, "Logged out successfully.")
+
+    return redirect("home")
+
+
+@login_required(login_url="login")
+def delete_account_view(request):
+
+    if request.method != "POST":
+        return redirect("account")
+
+    password = request.POST.get("password")
+    confirmation = request.POST.get("confirmation", "").strip()
+
+    user = authenticate(
+        username=request.user.username,
+        password=password,
+    )
+
+    if user is None:
+        messages.error(request, "Incorrect password.")
+        return redirect("account")
+
+    if confirmation != "DELETE":
+        messages.error(request, "Type DELETE to confirm.")
+        return redirect("account")
+
+    request.user.delete()
+
+    messages.success(request, "Your account has been deleted.")
+
+    return redirect("home")
