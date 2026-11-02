@@ -4,10 +4,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <title>{% block title %}Secure Chat{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'css/vendor/alertify.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/vendor/semantic.min.css' %}"> 
+    <link rel="stylesheet" href="{% static 'css/vendor/semantic.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/vendor/terminal.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
@@ -16,26 +15,38 @@
 {% block content %}
 {% endblock %}
 
+{% if messages %}
+<script id="django-messages" type="application/json">
+[
+{% for message in messages %}
+{"level": "{{ message.tags|escapejs }}", "text": "{{ message|escapejs }}"}{% if not forloop.last %},{% endif %}
+{% endfor %}
+]
+</script>
+{% endif %}
+
 <script src="{% static 'js/vendor/jquery-3.7.1.min.js' %}"></script>
 <script src="{% static 'js/vendor/alertify.min.js' %}"></script>
+<script src="{% static 'js/chat.js' %}"></script>
 
 <script>
-{% if messages %}
-    {% for message in messages %}
-
-        {% if message.tags == "success" %}
-            alertify.success("{{ message }}");
-        {% elif message.tags == "error" %}
-            alertify.error("{{ message }}");
-        {% elif message.tags == "warning" %}
-            alertify.warning("{{ message }}");
-        {% else %}
-            alertify.message("{{ message }}");
-        {% endif %}
-
-    {% endfor %}
-{% endif %}
+(function () {
+  var el = document.getElementById("django-messages");
+  if (!el) return;
+  var payload;
+  try { payload = JSON.parse(el.textContent); } catch (e) { return; }
+  if (!Array.isArray(payload)) return;
+  payload.forEach(function (m) {
+    var text = m.text || "";
+    if (m.level === "success") alertify.success(text);
+    else if (m.level === "error") alertify.error(text);
+    else if (m.level === "warning") alertify.warning(text);
+    else alertify.message(text);
+  });
+})();
 </script>
+
+{% block scripts %}{% endblock %}
 
 </body>
 </html>

@@ -49,10 +49,25 @@ Account
 
   <div class="account-actions">
 
-    <button type="button" class="btn btn-default" id="change-password-btn">
+    <div class="account-buttons">
 
-      CHANGE PASSWORD
-    </button>
+      <button type="button" class="btn btn-default" id="change-password-btn">
+        CHANGE PASSWORD
+      </button>
+
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-default">
+          LOGOUT
+        </button>
+      </form>
+
+      <button type="button" class="btn btn-error" id="delete-account-btn">
+        DELETE ACCOUNT
+      </button>
+
+    </div>
+
     <div id="change-password-form" class="hidden-form">
 
       <hr>
@@ -62,40 +77,33 @@ Account
         {% csrf_token %}
 
         <p>
-          <input type="password" name="current_password" placeholder="Current Password" required>
+          <input type="password"
+                 name="current_password"
+                 placeholder="Current Password"
+                 required>
         </p>
 
         <p>
-          <input type="password" name="new_password" placeholder="New Password" required>
+          <input type="password"
+                 name="new_password"
+                 placeholder="New Password"
+                 required>
         </p>
 
         <p>
-          <input type="password" name="confirm_password" placeholder="Confirm New Password" required>
+          <input type="password"
+                 name="confirm_password"
+                 placeholder="Confirm New Password"
+                 required>
         </p>
 
         <button type="submit" class="btn btn-default">
-
           UPDATE PASSWORD
-
         </button>
 
       </form>
 
     </div>
-
-    <form method="post" action="{% url 'logout' %}">
-      {% csrf_token %}
-
-      <button type="submit" class="btn btn-default">
-        LOGOUT
-      </button>
-    </form>
-
-    <button type="button" class="btn btn-error" id="delete-account-btn">
-
-      DELETE ACCOUNT
-
-    </button>
 
     <div id="delete-account-form" class="hidden-form">
 
@@ -108,21 +116,22 @@ Account
         {% csrf_token %}
 
         <p>
-
-          <input type="password" name="password" placeholder="Current Password" required>
-
+          <input type="password"
+                 name="password"
+                 placeholder="Current Password"
+                 required>
         </p>
 
         <p>
-
-          <input type="text" name="confirmation" placeholder="Type DELETE" autocomplete="off" required>
-
+          <input type="text"
+                 name="confirmation"
+                 placeholder="Type DELETE"
+                 autocomplete="off"
+                 required>
         </p>
 
-        <button class="btn btn-error" type="submit">
-
+        <button type="submit" class="btn btn-error">
           CONFIRM DELETE
-
         </button>
 
       </form>
@@ -134,50 +143,40 @@ Account
 </div>
 
 <script>
-  document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", () => {
 
-    const button = document.getElementById("change-password-btn");
-    const form = document.getElementById("change-password-form");
+    const changeButton = document.getElementById("change-password-btn");
+    const deleteButton = document.getElementById("delete-account-btn");
 
-    form.style.display = "none";
+    const changeForm = document.getElementById("change-password-form");
+    const deleteForm = document.getElementById("delete-account-form");
 
-    button.addEventListener("click", function () {
+    changeForm.style.display = "none";
+    deleteForm.style.display = "none";
 
-      if (form.style.display === "none") {
-        form.style.display = "block";
-      } else {
-        form.style.display = "none";
-      }
+    changeButton.addEventListener("click", () => {
+
+        if (changeForm.style.display === "none") {
+            changeForm.style.display = "block";
+            deleteForm.style.display = "none";
+        } else {
+            changeForm.style.display = "none";
+        }
 
     });
 
-  });
+    deleteButton.addEventListener("click", () => {
+
+        if (deleteForm.style.display === "none") {
+            deleteForm.style.display = "block";
+            changeForm.style.display = "none";
+        } else {
+            deleteForm.style.display = "none";
+        }
+
+    });
+
+});
 </script>
-
-<script>
-
-  document.addEventListener("DOMContentLoaded", () => {
-
-    const button =
-      document.getElementById("delete-account-btn");
-
-    const form =
-      document.getElementById("delete-account-form");
-
-    form.style.display = "none";
-
-    button.onclick = () => {
-
-      form.style.display =
-        form.style.display === "none"
-          ? "block"
-          : "none";
-
-    };
-
-  });
-
-</script>
-
 
 {% endblock %}
