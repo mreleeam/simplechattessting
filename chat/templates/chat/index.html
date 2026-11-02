@@ -1,63 +1,129 @@
 {% extends "base.html" %}
 
-{% block title %}
-Chat
-{% endblock %}
+{% block title %}Chat{% endblock %}
 
 {% block content %}
 
 <div class="chat-card">
 
-    <h1 class="terminal-title">
-        CHAT...<span class="cursor">|</span>
-    </h1>
+  <h1 class="terminal-title" style="font-size:40px !important;">
+    CHAT<span class="cursor">|</span>
+  </h1>
 
-    <div class="chat-info">
-
-        <p>
-            <span class="chat-label">Username</span>
-            <span class="chat-separator">&gt;</span>
-            <span>{{ request.user.username }}</span>
-        </p>
-
-        <p>
-            <span class="chat-label">Status</span>
-            <span class="chat-separator">&gt;</span>
-            <span class="status-connected">CONNECTED</span>
-        </p>
-
-    </div>
-
-    <hr>
-
-    <h3>ROOMS</h3>
-
-    <div class="room-list">
-
-        {% for room in rooms %}
-
-        <p>
-            <a class="room-link"
-               href="{% url 'chat:room' room.name %}">
-                &gt; #{{ room.name }}
-            </a>
-        </p>
-
-        {% empty %}
-
-        <p>No rooms available.</p>
-
-        {% endfor %}
-
-    </div>
-
-    <hr>
-
-    <h3>DIRECT MESSAGES</h3>
-
-    <p class="text-muted">
-        No conversations.
+  <div class="chat-info">
+    <p>
+      <span class="chat-label">Username</span>
+      <span class="chat-separator">&gt;</span>
+      <span>{{ request.user.username }}</span>
     </p>
+    <p>
+      <span class="chat-label">Status</span>
+      <span class="chat-separator">&gt;</span>
+      <span class="status-connected">CONNECTED</span>
+    </p>
+  </div>
+
+  <hr>
+
+  <h3>PRIVATE MESSAGES</h3>
+
+  <form method="post" action="{% url 'chat:create_private_chat' %}" class="inline-form">
+    {% csrf_token %}
+    <input type="text" name="username" placeholder="Username" autocomplete="off" required>
+    <button class="btn btn-primary">START CHAT</button>
+  </form>
+
+  {% if private_chats %}
+    <div class="room-list">
+      {% for chat in private_chats %}
+        {% if chat.user1 == request.user %}
+          <a class="room-link" href="{% url 'chat:private_chat' chat.user2.username %}">
+            &gt; @{{ chat.user2.username }}
+          </a>
+        {% else %}
+          <a class="room-link" href="{% url 'chat:private_chat' chat.user1.username %}">
+            &gt; @{{ chat.user1.username }}
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-muted">No conversations yet.</p>
+  {% endif %}
+
+  <hr>
+
+  <h3>PRIVATE ROOMS</h3>
+
+  <form method="post" action="{% url 'chat:create_private_room' %}" class="inline-form">
+    {% csrf_token %}
+    <input type="text" name="room_name" placeholder="New private room name" autocomplete="off" required>
+    <button class="btn btn-primary">CREATE PRIVATE ROOM</button>
+  </form>
+
+  {% if private_rooms %}
+    <div class="room-list">
+      {% for pr in private_rooms %}
+        <div class="room-row">
+          <a class="room-link" href="{% url 'chat:private_room' pr.name %}">
+            &gt; #{{ pr.name }}
+          </a>
+          <form method="post" action="{% url 'chat:leave_private_room' pr.name %}" class="inline-action">
+            {% csrf_token %}
+            <button class="btn btn-error btn-small">LEAVE</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-muted">No private rooms yet.</p>
+  {% endif %}
+
+  <hr>
+
+  <h3>JOIN A PRIVATE ROOM</h3>
+
+  <p class="text-muted">Paste an invite token from a room owner.</p>
+
+  <form method="post" action="{% url 'chat:join_by_link' %}" class="inline-form">
+    {% csrf_token %}
+    <input
+      type="text"
+      name="invite_link"
+      placeholder="Paste invite token"
+      autocomplete="off"
+      required
+    >
+    <button type="submit" class="btn btn-primary">JOIN</button>
+  </form>
+
+  <hr>
+
+  <h3>PUBLIC ROOMS</h3>
+
+  <form method="post" action="{% url 'chat:join_or_create_public_room' %}" class="inline-form">
+    {% csrf_token %}
+    <input type="text" name="room_name" placeholder="Room name" autocomplete="off" required>
+    <button class="btn btn-primary">JOIN OR CREATE</button>
+  </form>
+
+  {% if my_public_rooms %}
+    <div class="room-list">
+      {% for room in my_public_rooms %}
+        <div class="room-row">
+          <a class="room-link" href="{% url 'chat:room' room.name %}">
+            &gt; #{{ room.name }}
+          </a>
+          <form method="post" action="{% url 'chat:leave_public_room' room.name %}" class="inline-action">
+            {% csrf_token %}
+            <button class="btn btn-error btn-small">LEAVE</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-muted">You have not joined any public rooms.</p>
+  {% endif %}
 
 </div>
 

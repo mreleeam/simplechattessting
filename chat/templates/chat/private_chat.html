@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}@{{ other_user.username }}{% endblock %}
+
+{% block content %}
+
+<div class="account-card">
+
+  <h1 class="terminal-title" style="font-size:32px !important;">
+    @{{ other_user.username|upper }}<span class="cursor">|</span>
+  </h1>
+
+  <p>
+    <span class="account-label">Status</span>
+    <span class="account-separator">&gt;</span>
+    <span id="connection-status" class="status-disconnected">CONNECTING</span>
+  </p>
+
+  <div class="room-actions">
+    <form method="post" action="{% url 'chat:delete_private_history' other_user.username %}" class="inline-action">
+      {% csrf_token %}
+      <button class="btn btn-error btn-small">CLEAR MY MESSAGES</button>
+    </form>
+    {% if is_blocked %}
+      <form method="post" action="{% url 'chat:unblock_user' other_user.username %}" class="inline-action">
+        {% csrf_token %}
+        <button class="btn btn-default btn-small">UNBLOCK</button>
+      </form>
+    {% else %}
+      <form method="post" action="{% url 'chat:block_user' other_user.username %}" class="inline-action">
+        {% csrf_token %}
+        <button class="btn btn-error btn-small">BLOCK</button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if blocked_by_them %}
+    <p class="chat-error">You cannot send messages to this user.</p>
+  {% elif is_blocked %}
+    <p class="chat-error">You have blocked this user. Unblock to send messages.</p>
+  {% endif %}
+
+  <hr>
+
+  <div id="chat-log" class="chat-log"
+       data-ws-prefix="/ws/chat/u/"
+       data-chat-id="{{ chat.id }}">
+    {% for message in chat_messages %}
+      <p>
+        <span class="chat-time">{{ message.created|date:"H:i" }}</span>
+        <span class="chat-user">{{ message.sender.username }}</span>
+        &gt;
+        <span class="chat-message">{{ message.content }}</span>
+      </p>
+    {% empty %}
+      <p class="text-muted">No messages yet.</p>
+    {% endfor %}
+  </div>
+
+  <hr>
+
+  <div class="chat-input">
+    <span class="chat-prompt">&gt;</span>
+    <input id="chat-message-input" type="text" placeholder="Type a message..." autocomplete="off" maxlength="4000"
+           {% if is_blocked or blocked_by_them %}disabled{% endif %}>
+    <span class="terminal-cursor">|</span>
+  </div>
+
+</div>
+
+{% endblock %}

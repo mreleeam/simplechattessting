@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}#{{ room.name }}{% endblock %}
+
+{% block content %}
+
+<div class="auth-box">
+
+  <h1 class="terminal-title" style="font-size:36px !important;">
+    #{{ room.name|upper }}<span class="cursor">|</span>
+  </h1>
+
+  <p class="text-muted" style="margin-top:2rem;">
+    You need an invite token to enter this room.
+  </p>
+
+  <form method="post" action="{% url 'chat:join_by_link' %}">
+    {% csrf_token %}
+    <input
+      type="text"
+      name="invite_link"
+      placeholder="Paste invite token"
+      autocomplete="off"
+      required
+    >
+    <button type="submit">JOIN ROOM</button>
+  </form>
+
+  <p class="auth-link" style="margin-top:2rem;">
+    <a href="{% url 'chat:index' %}">← Back to chat</a>
+  </p>
+
+</div>
+
+{% endblock %}
