@@ -1,12 +1,66 @@
 {% extends "base.html" %}
 
-{% block title %}
-Secure Chat
-{% endblock %}
+{% block title %}Secure Chat{% endblock %}
 
 {% block content %}
 
-{% include "components/hero.html" %}
-{% include "components/home_panel.html" %}
+<section class="landing">
+
+  <div class="landing-hero">
+    <p class="landing-tagline">
+      End-to-end conversations. No noise. No tracking. Just text.
+    </p>
+
+    {% if request.user.is_authenticated %}
+      <div class="landing-cta">
+        <a href="{% url 'chat:index' %}" class="btn btn-primary landing-btn">
+          OPEN CHAT
+        </a>
+      </div>
+    {% else %}
+      <div class="landing-cta">
+        <a href="{% url 'register' %}" class="btn btn-primary landing-btn">
+          CREATE ACCOUNT
+        </a>
+        <a href="{% url 'login' %}" class="btn landing-btn">
+          LOGIN
+        </a>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="landing-features">
+
+    <div class="feature">
+      <div class="feature-icon">◈</div>
+      <h3>PRIVATE MESSAGES</h3>
+      <p>One-on-one conversations. Only you and the other person. No group leaks, no forwarding.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">▣</div>
+      <h3>PRIVATE ROOMS</h3>
+      <p>Invite-only spaces with a rotatable token. Kill a leaked link in one click.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">◇</div>
+      <h3>PUBLIC ROOMS</h3>
+      <p>Open discussions. Join or create by name. Leave when you want.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">⌘</div>
+      <h3>YOUR CONTROL</h3>
+      <p>Block, remove, clear history, delete account. Everything is a two-click action.</p>
+    </div>
+
+  </div>
+
+  <div class="landing-footer">
+    <p>Built for text. Runs on Django + Channels.</p>
+  </div>
+
+</section>
 
 {% endblock %}

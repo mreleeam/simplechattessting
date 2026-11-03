@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_colors %}
 
 {% block title %}#{{ room.name }}{% endblock %}
 
@@ -17,22 +18,27 @@
   </p>
 
   <div class="room-actions">
-    <form method="post" action="{% url 'chat:delete_private_room_history' room.name %}" class="inline-action">
+    <form method="post" action="{% url 'chat:delete_private_room_history' room.name %}" class="inline-action"
+          data-confirm="Delete all YOUR messages in #{{ room.name }}? Other members keep theirs."
+          data-confirm-ok="CLEAR"
+          data-confirm-danger="1">
       {% csrf_token %}
-      <button class="btn btn-error btn-small">CLEAR MY MESSAGES</button>
+      <button class="btn btn-error btn-small">CLEAR MESSAGES</button>
     </form>
-
     {% if is_owner %}
       <form method="post" action="{% url 'chat:delete_private_room' room.name %}" class="inline-action"
-            onsubmit="return confirm('Delete this room permanently for everyone?');">
+            data-confirm="Delete this room permanently for everyone?"
+            data-confirm-ok="DELETE"
+            data-confirm-danger="1">
         {% csrf_token %}
         <button class="btn btn-error btn-small">DELETE ROOM</button>
       </form>
-      <button type="button" class="btn btn-default btn-small" data-toggle="token-panel">
-        TOKEN
-      </button>
+      <button type="button" class="btn btn-default btn-small" data-toggle="token-panel">TOKEN</button>
     {% else %}
-      <form method="post" action="{% url 'chat:leave_private_room' room.name %}" class="inline-action">
+      <form method="post" action="{% url 'chat:leave_private_room' room.name %}" class="inline-action"
+            data-confirm="Leave #{{ room.name }}?"
+            data-confirm-ok="LEAVE"
+            data-confirm-danger="1">
         {% csrf_token %}
         <button class="btn btn-error btn-small">LEAVE</button>
       </form>
@@ -46,24 +52,15 @@
         <span class="account-separator">&gt;</span>
       </p>
       <p>
-        <input
-          type="text"
-          id="invite-token"
-          readonly
-          value="{{ room.invite_token }}"
-          style="width:100%;"
-        >
+        <input type="text" id="invite-token" readonly value="{{ room.invite_token }}" style="width:100%;">
       </p>
       <p>
-        <button type="button" class="btn btn-default btn-small" id="copy-invite-btn">
-          COPY TOKEN
-        </button>
-        <form method="post" action="{% url 'chat:rotate_invite' room.name %}" style="display:inline;">
+        <button type="button" class="btn btn-default btn-small" id="copy-invite-btn">COPY TOKEN</button>
+        <form method="post" action="{% url 'chat:rotate_invite' room.name %}" style="display:inline;"
+              data-confirm="Rotate the token? The old one stops working immediately."
+              data-confirm-ok="ROTATE">
           {% csrf_token %}
-          <button type="submit" class="btn btn-error btn-small"
-                  onclick="return confirm('Rotate the token? The old one stops working immediately.');">
-            ROTATE TOKEN
-          </button>
+          <button type="submit" class="btn btn-error btn-small">ROTATE TOKEN</button>
         </form>
       </p>
     </div>
@@ -73,13 +70,27 @@
 
   <div id="chat-log" class="chat-log"
        data-ws-prefix="/ws/chat/pr/"
-       data-room="{{ room.name|escapejs }}">
+       data-room="{{ room.name|escapejs }}"
+       data-color-mode="palette"
+       data-my-username="{{ request.user.username }}"
+       data-kind="pr"
+       data-older-url="{% url 'chat:older_private_room_messages' room.name %}">
+    {% if has_more %}
+      <button type="button" id="load-older-btn" class="load-older-btn">LOAD OLDER MESSAGES</button>
+    {% endif %}
     {% for message in chat_messages %}
-      <p>
-        <span class="chat-time">{{ message.created|date:"H:i" }}</span>
-        <span class="chat-user">{{ message.sender.username }}</span>
+      <p data-id="{{ message.id }}" data-kind="pr" data-created="{{ message.created|date:'c' }}">
+        <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
+        <span class="chat-user" style="color: {{ message.sender|user_color }};">{{ message.sender.username }}</span>
         &gt;
         <span class="chat-message">{{ message.content }}</span>
+        {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
+        {% with mine=my_reactions|dict_get:message.id %}
+          <span class="chat-reactions" data-id="{{ message.id }}">
+            <button type="button" class="reaction-btn {% if mine == 1 %}active{% endif %}" data-value="1" title="Thumbs up">👍 <span class="react-up">{{ message.up }}</span></button>
+            <button type="button" class="reaction-btn {% if mine == -1 %}active{% endif %}" data-value="-1" title="Thumbs down">👎 <span class="react-down">{{ message.down }}</span></button>
+          </span>
+        {% endwith %}
       </p>
     {% empty %}
       <p class="text-muted">No messages yet.</p>
@@ -90,8 +101,7 @@
 
   <div class="chat-input">
     <span class="chat-prompt">&gt;</span>
-    <input id="chat-message-input" type="text" placeholder="Type a message..." autocomplete="off" maxlength="4000">
-    <span class="terminal-cursor">|</span>
+    <textarea id="chat-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" autocomplete="off" rows="1" maxlength="4000"></textarea>
   </div>
 
 </div>

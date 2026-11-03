@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load user_colors %}
+
+{% block title %}@{{ target.username }}{% endblock %}
+
+{% block content %}
+
+<div class="chat-card">
+
+  <div class="profile-header" data-username="{{ target.username }}">
+    <div class="profile-avatar" style="color: {{ target|user_color }}; border-color: {{ target|user_color }};">
+      {{ target.username|first|upper }}
+    </div>
+    <div>
+      <h1 class="terminal-title" style="font-size:28px !important; text-align:left; color: {{ target|user_color }};">
+        @{{ target.username }}<span class="cursor">|</span>
+      </h1>
+      <p class="text-muted" style="margin:0.25rem 0;">
+        <span class="presence"></span>
+        Joined {{ target.date_joined|date:"d M Y" }}
+        {% if profile and profile.location %} · {{ profile.location }}{% endif %}
+        {% if profile and profile.age %} · {{ profile.age }} years{% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if profile and profile.bio %}
+    <div class="profile-bio">
+      <h4>Bio</h4>
+      <p>{{ profile.bio|linebreaksbr }}</p>
+    </div>
+  {% endif %}
+
+  {% if not is_self %}
+    <div class="room-actions">
+      <form method="post" action="{% url 'chat:create_private_chat' %}" class="inline-action">
+        {% csrf_token %}
+        <input type="hidden" name="username" value="{{ target.username }}">
+        <button class="btn btn-primary btn-small">START CHAT</button>
+      </form>
+      {% if is_blocked %}
+        <form method="post" action="{% url 'chat:unblock_user' target.username %}" class="inline-action"
+              data-confirm="Unblock @{{ target.username }}?"
+              data-confirm-ok="UNBLOCK">
+          {% csrf_token %}
+          <button class="btn btn-default btn-small">UNBLOCK</button>
+        </form>
+      {% else %}
+        <form method="post" action="{% url 'chat:block_user' target.username %}" class="inline-action"
+              data-confirm="Block @{{ target.username }}? They will not be able to message you."
+              data-confirm-ok="BLOCK"
+              data-confirm-danger="1">
+          {% csrf_token %}
+          <button class="btn btn-error btn-small">BLOCK</button>
+        </form>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="text-muted">
+      <a href="{% url 'account' %}" class="room-link" style="display:inline;padding:0;">Edit your profile →</a>
+    </p>
+  {% endif %}
+
+</div>
+
+{% endblock %}

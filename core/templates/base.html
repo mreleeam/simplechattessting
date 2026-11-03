@@ -12,8 +12,32 @@
 </head>
 <body class="terminal">
 
-{% block content %}
-{% endblock %}
+<nav class="topbar">
+  <a href="{% url 'home' %}" class="brand">
+    Secure<span class="brand-brace">{</span>chat<span class="brand-brace">}</span>
+  </a>
+
+  <div class="topbar-right">
+    {% if request.user.is_authenticated %}
+      <a href="{% url 'chat:index' %}" class="topbar-link">CHAT</a>
+      <a href="{% url 'account' %}" class="topbar-link">ACCOUNT</a>
+      <form method="post" action="{% url 'logout' %}" class="topbar-logout"
+            data-confirm="Log out?"
+            data-confirm-ok="LOGOUT">
+        {% csrf_token %}
+        <button class="topbar-link">LOGOUT</button>
+      </form>
+    {% else %}
+      <a href="{% url 'login' %}" class="topbar-link">LOGIN</a>
+      <a href="{% url 'register' %}" class="topbar-link">REGISTER</a>
+    {% endif %}
+  </div>
+</nav>
+
+<main class="page">
+  {% block content %}
+  {% endblock %}
+</main>
 
 {% if messages %}
 <script id="django-messages" type="application/json">
@@ -27,6 +51,8 @@
 
 <script src="{% static 'js/vendor/jquery-3.7.1.min.js' %}"></script>
 <script src="{% static 'js/vendor/alertify.min.js' %}"></script>
+<script src="{% static 'js/confirm.js' %}"></script>
+<script src="{% static 'js/presence.js' %}"></script>
 <script src="{% static 'js/chat.js' %}"></script>
 
 <script>
@@ -44,6 +70,20 @@
     else alertify.message(text);
   });
 })();
+
+document.addEventListener("keydown", function (e) {
+  if (e.target.matches("input, textarea")) {
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  if (e.key === "/") {
+    var input = document.getElementById("chat-message-input");
+    if (input && !input.disabled) {
+      e.preventDefault();
+      input.focus();
+    }
+  }
+});
 </script>
 
 {% block scripts %}{% endblock %}

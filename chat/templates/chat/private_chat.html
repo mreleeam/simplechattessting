@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_colors %}
 
 {% block title %}@{{ other_user.username }}{% endblock %}
 
@@ -16,18 +17,42 @@
     <span id="connection-status" class="status-disconnected">CONNECTING</span>
   </p>
 
+  <p data-username="{{ other_user.username }}">
+    <span class="presence"></span>
+    <a href="{% url 'chat:profile' other_user.username %}" class="room-link" style="padding:0;display:inline;">
+      View @{{ other_user.username }}'s profile →
+    </a>
+  </p>
+
   <div class="room-actions">
-    <form method="post" action="{% url 'chat:delete_private_history' other_user.username %}" class="inline-action">
+    <form method="post" action="{% url 'chat:delete_private_history' other_user.username %}" class="inline-action"
+          data-confirm="Delete all YOUR messages with @{{ other_user.username }}? Their messages stay."
+          data-confirm-ok="CLEAR"
+          data-confirm-danger="1">
       {% csrf_token %}
-      <button class="btn btn-error btn-small">CLEAR MY MESSAGES</button>
+      <button class="btn btn-error btn-small">CLEAR MESSAGES</button>
     </form>
+
+    <form method="post" action="{% url 'chat:remove_private_chat' other_user.username %}" class="inline-action"
+          data-confirm="Remove this conversation from your list? You can start it again anytime. This does not block @{{ other_user.username }}."
+          data-confirm-ok="REMOVE"
+          data-confirm-danger="1">
+      {% csrf_token %}
+      <button class="btn btn-error btn-small">REMOVE</button>
+    </form>
+
     {% if is_blocked %}
-      <form method="post" action="{% url 'chat:unblock_user' other_user.username %}" class="inline-action">
+      <form method="post" action="{% url 'chat:unblock_user' other_user.username %}" class="inline-action"
+            data-confirm="Unblock @{{ other_user.username }}?"
+            data-confirm-ok="UNBLOCK">
         {% csrf_token %}
         <button class="btn btn-default btn-small">UNBLOCK</button>
       </form>
     {% else %}
-      <form method="post" action="{% url 'chat:block_user' other_user.username %}" class="inline-action">
+      <form method="post" action="{% url 'chat:block_user' other_user.username %}" class="inline-action"
+            data-confirm="Block @{{ other_user.username }}? They will not be able to message you."
+            data-confirm-ok="BLOCK"
+            data-confirm-danger="1">
         {% csrf_token %}
         <button class="btn btn-error btn-small">BLOCK</button>
       </form>
@@ -44,26 +69,42 @@
 
   <div id="chat-log" class="chat-log"
        data-ws-prefix="/ws/chat/u/"
-       data-chat-id="{{ chat.id }}">
+       data-chat-id="{{ chat.id }}"
+       data-color-mode="me-vs-them"
+       data-my-username="{{ request.user.username }}"
+       data-kind="pc"
+       data-older-url="{% url 'chat:older_private_chat_messages' other_user.username %}"
+       data-typing-url="/ws/chat/u/{{ chat.id }}/">
+    {% if has_more %}
+      <button type="button" id="load-older-btn" class="load-older-btn">LOAD OLDER MESSAGES</button>
+    {% endif %}
     {% for message in chat_messages %}
-      <p>
-        <span class="chat-time">{{ message.created|date:"H:i" }}</span>
-        <span class="chat-user">{{ message.sender.username }}</span>
+      <p data-id="{{ message.id }}" data-kind="pc" data-created="{{ message.created|date:'c' }}">
+        <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
+        <span class="chat-user" style="color: {% if message.sender == request.user %}#58a6ff{% else %}#f85149{% endif %};">{{ message.sender.username }}</span>
         &gt;
-        <span class="chat-message">{{ message.content }}</span>
+        <span class="chat-message" style="color: {% if message.sender == request.user %}#58a6ff{% else %}#f85149{% endif %};">{{ message.content }}</span>
+        {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
+        {% with mine=my_reactions|dict_get:message.id %}
+          <span class="chat-reactions" data-id="{{ message.id }}">
+            <button type="button" class="reaction-btn {% if mine == 1 %}active{% endif %}" data-value="1" title="Thumbs up">👍 <span class="react-up">{{ message.up }}</span></button>
+            <button type="button" class="reaction-btn {% if mine == -1 %}active{% endif %}" data-value="-1" title="Thumbs down">👎 <span class="react-down">{{ message.down }}</span></button>
+          </span>
+        {% endwith %}
       </p>
     {% empty %}
       <p class="text-muted">No messages yet.</p>
     {% endfor %}
   </div>
 
+  <div id="typing-indicator" hidden></div>
+
   <hr>
 
   <div class="chat-input">
     <span class="chat-prompt">&gt;</span>
-    <input id="chat-message-input" type="text" placeholder="Type a message..." autocomplete="off" maxlength="4000"
-           {% if is_blocked or blocked_by_them %}disabled{% endif %}>
-    <span class="terminal-cursor">|</span>
+    <textarea id="chat-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" autocomplete="off" rows="1" maxlength="4000"
+              {% if is_blocked or blocked_by_them %}disabled{% endif %}></textarea>
   </div>
 
 </div>

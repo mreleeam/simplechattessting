@@ -29,7 +29,6 @@ Account
     <p>
       <span class="account-label">Last Login</span>
       <span class="account-separator">&gt;</span>
-
       {% if request.user.last_login %}
       <span>{{ request.user.last_login|date:"d M Y H:i" }}</span>
       {% else %}
@@ -47,6 +46,31 @@ Account
 
   <hr>
 
+  <h3>PROFILE</h3>
+
+  <form method="post" action="{% url 'update_profile' %}" class="profile-form">
+    {% csrf_token %}
+
+    <label class="form-label">
+      Bio
+      <textarea name="bio" maxlength="500" rows="4" placeholder="Tell people about yourself...">{{ profile.bio }}</textarea>
+    </label>
+
+    <label class="form-label">
+      Age
+      <input type="number" name="age" min="13" max="120" value="{{ profile.age|default:'' }}" placeholder="Optional">
+    </label>
+
+    <label class="form-label">
+      Location
+      <input type="text" name="location" maxlength="80" value="{{ profile.location }}" placeholder="Optional">
+    </label>
+
+    <button type="submit" class="btn btn-primary">SAVE PROFILE</button>
+  </form>
+
+  <hr>
+
   <div class="account-actions">
 
     <div class="account-buttons">
@@ -55,7 +79,7 @@ Account
         CHANGE PASSWORD
       </button>
 
-      <form method="post" action="{% url 'logout' %}">
+      <form method="post" action="{% url 'logout' %}" data-confirm="Log out?" data-confirm-ok="LOGOUT">
         {% csrf_token %}
         <button type="submit" class="btn btn-default">
           LOGOUT
@@ -73,34 +97,11 @@ Account
       <hr>
 
       <form method="post" action="{% url 'change_password' %}">
-
         {% csrf_token %}
-
-        <p>
-          <input type="password"
-                 name="current_password"
-                 placeholder="Current Password"
-                 required>
-        </p>
-
-        <p>
-          <input type="password"
-                 name="new_password"
-                 placeholder="New Password"
-                 required>
-        </p>
-
-        <p>
-          <input type="password"
-                 name="confirm_password"
-                 placeholder="Confirm New Password"
-                 required>
-        </p>
-
-        <button type="submit" class="btn btn-default">
-          UPDATE PASSWORD
-        </button>
-
+        <p><input type="password" name="current_password" placeholder="Current Password" required></p>
+        <p><input type="password" name="new_password" placeholder="New Password" required></p>
+        <p><input type="password" name="confirm_password" placeholder="Confirm New Password" required></p>
+        <button type="submit" class="btn btn-default">UPDATE PASSWORD</button>
       </form>
 
     </div>
@@ -111,43 +112,43 @@ Account
 
       <h3>DELETE ACCOUNT</h3>
 
-      <form method="post" action="{% url 'delete_account' %}">
-
+      <form method="post" action="{% url 'delete_account' %}"
+            data-confirm="Delete your account permanently? This cannot be undone."
+            data-confirm-ok="DELETE"
+            data-confirm-danger="1">
         {% csrf_token %}
-
-        <p>
-          <input type="password"
-                 name="password"
-                 placeholder="Current Password"
-                 required>
-        </p>
-
-        <p>
-          <input type="text"
-                 name="confirmation"
-                 placeholder="Type DELETE"
-                 autocomplete="off"
-                 required>
-        </p>
-
-        <button type="submit" class="btn btn-error">
-          CONFIRM DELETE
-        </button>
-
+        <p><input type="password" name="password" placeholder="Current Password" required></p>
+        <p><input type="text" name="confirmation" placeholder="Type DELETE" autocomplete="off" required></p>
+        <button type="submit" class="btn btn-error">CONFIRM DELETE</button>
       </form>
 
     </div>
 
   </div>
 
+  <hr>
+
+  <h3>RECENT ACTIVITY</h3>
+
+  {% if login_records %}
+    <ul class="session-list">
+      {% for record in login_records %}
+        <li>
+          <span>{{ record.ip|default:"unknown" }} · {{ record.user_agent|truncatechars:50|default:"unknown" }}</span>
+          <span class="session-time">{{ record.created|date:"d M Y H:i" }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-muted">No logins recorded yet.</p>
+  {% endif %}
+
 </div>
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-
     const changeButton = document.getElementById("change-password-btn");
     const deleteButton = document.getElementById("delete-account-btn");
-
     const changeForm = document.getElementById("change-password-form");
     const deleteForm = document.getElementById("delete-account-form");
 
@@ -155,27 +156,22 @@ document.addEventListener("DOMContentLoaded", () => {
     deleteForm.style.display = "none";
 
     changeButton.addEventListener("click", () => {
-
         if (changeForm.style.display === "none") {
             changeForm.style.display = "block";
             deleteForm.style.display = "none";
         } else {
             changeForm.style.display = "none";
         }
-
     });
 
     deleteButton.addEventListener("click", () => {
-
         if (deleteForm.style.display === "none") {
             deleteForm.style.display = "block";
             changeForm.style.display = "none";
         } else {
             deleteForm.style.display = "none";
         }
-
     });
-
 });
 </script>
 

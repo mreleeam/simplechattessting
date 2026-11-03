@@ -6,6 +6,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.utils import timezone
 
+from .colors import color_for
 from .models import (
     Block,
     Message,
@@ -14,7 +15,7 @@ from .models import (
     PrivateRoom,
     PrivateRoomMember,
     PrivateRoomMessage,
-    PublicRoomMember,
+    Reaction,
     Room,
 )
 from .validators import validate_message_body
@@ -36,18 +37,69 @@ class RateLimiter:
 
 
 rate_limiter = RateLimiter(max_events=10, window_seconds=10.0)
-
 MAX_CONNECTIONS_PER_USER = 5
 _active_connections = defaultdict(int)
+
+_presence_group = "presence_global"
+_online_users = defaultdict(int)
 
 
 def _ts(dt):
     return timezone.localtime(dt).strftime("%H:%M")
 
 
+def _full_ts(dt):
+    return timezone.localtime(dt).strftime("%d %b %Y %H:%M")
+
+
+class PresenceConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        user = self.scope["user"]
+        if not user.is_authenticated:
+            await self.close(code=4001)
+            return
+        self.user = user
+        await self.channel_layer.group_add(_presence_group, self.channel_name)
+        _online_users[user.pk] += 1
+        if _online_users[user.pk] == 1:
+            await self.channel_layer.group_send(
+                _presence_group,
+                {"type": "presence_event", "username": user.username, "online": True},
+            )
+        await self.accept()
+        await self.send(text_data=json.dumps({
+            "type": "online_list",
+            "usernames": list(_online_users.keys()),
+        }))
+
+    async def disconnect(self, close_code):
+        if not hasattr(self, "user"):
+            return
+        await self.channel_layer.group_discard(_presence_group, self.channel_name)
+        _online_users[self.user.pk] -= 1
+        if _online_users[self.user.pk] <= 0:
+            del _online_users[self.user.pk]
+            await self.channel_layer.group_send(
+                _presence_group,
+                {"type": "presence_event", "username": self.user.username, "online": False},
+            )
+
+    async def receive(self, text_data):
+        pass
+
+    async def presence_event(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "presence",
+            "username": event["username"],
+            "online": event["online"],
+        }))
+
+
 class BaseChatConsumer(AsyncWebsocketConsumer):
     group_prefix = None
-    allow_connect = None
+    msg_kind = None
+    typing_enabled = False
+    reaction_field = None
 
     async def connect(self):
         user = self.scope["user"]
@@ -97,6 +149,35 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
             await self.send_json({"error": "Malformed frame."})
             return
 
+        msg_type = data.get("type", "message")
+
+        if msg_type == "typing":
+            if self.typing_enabled:
+                await self.channel_layer.group_send(
+                    self.group_name,
+                    {"type": "typing_broadcast", "username": user.username},
+                )
+            return
+
+        if msg_type == "reaction":
+            msg_id = data.get("id")
+            value = data.get("value")
+            if not msg_id or value not in (1, -1):
+                return
+            result = await self._apply_reaction(user, msg_id, value)
+            if result:
+                await self.channel_layer.group_send(
+                    self.group_name,
+                    {
+                        "type": "reaction_broadcast",
+                        "id": msg_id,
+                        "kind": self.msg_kind,
+                        "up": result["up"],
+                        "down": result["down"],
+                    },
+                )
+            return
+
         body, err = validate_message_body(data.get("message"))
         if err:
             await self.send_json({"error": err})
@@ -112,11 +193,61 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
             {"type": "broadcast", **saved},
         )
 
+    @database_sync_to_async
+    def _apply_reaction(self, user, msg_id, value):
+        if not self.reaction_field:
+            return None
+        filter_kwargs = {"user": user, self.reaction_field + "_id": msg_id}
+        existing = Reaction.objects.filter(**filter_kwargs).first()
+        if existing:
+            if existing.value == value:
+                existing.delete()
+            else:
+                existing.value = value
+                existing.save(update_fields=["value"])
+        else:
+            Reaction.objects.create(
+                user=user,
+                value=value,
+                **{self.reaction_field + "_id": msg_id},
+            )
+        up = Reaction.objects.filter(
+            value=1, **{self.reaction_field + "_id": msg_id}
+        ).count()
+        down = Reaction.objects.filter(
+            value=-1, **{self.reaction_field + "_id": msg_id}
+        ).count()
+        return {"up": up, "down": down}
+
     async def broadcast(self, event):
         await self.send_json({
+            "type": "message",
+            "id": event.get("id"),
+            "kind": self.msg_kind,
             "username": event["username"],
             "message": event["message"],
             "timestamp": event["timestamp"],
+            "full_timestamp": event.get("full_timestamp", ""),
+            "created": event.get("created", ""),
+            "user_color": event.get("user_color", "#58a6ff"),
+            "up": event.get("up", 0),
+            "down": event.get("down", 0),
+            "mine": event.get("mine", 0),
+        })
+
+    async def typing_broadcast(self, event):
+        await self.send_json({
+            "type": "typing",
+            "username": event["username"],
+        })
+
+    async def reaction_broadcast(self, event):
+        await self.send_json({
+            "type": "reaction",
+            "id": event["id"],
+            "kind": event["kind"],
+            "up": event["up"],
+            "down": event["down"],
         })
 
     async def send_json(self, payload):
@@ -125,6 +256,8 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
 
 class ChatConsumer(BaseChatConsumer):
     group_prefix = "chat"
+    msg_kind = "room"
+    reaction_field = "room_message"
 
     async def connect(self):
         self.identity = self.scope["url_route"]["kwargs"]["room_name"]
@@ -141,15 +274,27 @@ class ChatConsumer(BaseChatConsumer):
         except Room.DoesNotExist:
             return None, "Room no longer exists."
         msg = Message.objects.create(room=room, sender=user, content=body)
+        up = Reaction.objects.filter(room_message=msg, value=1).count()
+        down = Reaction.objects.filter(room_message=msg, value=-1).count()
         return {
+            "id": msg.id,
             "username": user.username,
             "message": msg.content,
             "timestamp": _ts(msg.created),
+            "full_timestamp": _full_ts(msg.created),
+            "created": msg.created.isoformat(),
+            "user_color": color_for(user),
+            "up": up,
+            "down": down,
+            "mine": 0,
         }, None
 
 
 class PrivateChatConsumer(BaseChatConsumer):
     group_prefix = "private"
+    msg_kind = "pc"
+    typing_enabled = True
+    reaction_field = "private_chat_message"
 
     async def connect(self):
         self.identity = self.scope["url_route"]["kwargs"]["chat_id"]
@@ -178,15 +323,28 @@ class PrivateChatConsumer(BaseChatConsumer):
         msg = PrivateChatMessage.objects.create(
             chat=chat, sender=user, content=body
         )
+        recipient = chat.user2 if chat.user1_id == user.pk else chat.user1
+        chat.unhide_for(recipient)
+        up = Reaction.objects.filter(private_chat_message=msg, value=1).count()
+        down = Reaction.objects.filter(private_chat_message=msg, value=-1).count()
         return {
+            "id": msg.id,
             "username": user.username,
             "message": msg.content,
             "timestamp": _ts(msg.created),
+            "full_timestamp": _full_ts(msg.created),
+            "created": msg.created.isoformat(),
+            "user_color": color_for(user),
+            "up": up,
+            "down": down,
+            "mine": 0,
         }, None
 
 
 class PrivateRoomConsumer(BaseChatConsumer):
     group_prefix = "privateroom"
+    msg_kind = "pr"
+    reaction_field = "private_room_message"
 
     async def connect(self):
         self.identity = self.scope["url_route"]["kwargs"]["room_name"]
@@ -209,8 +367,17 @@ class PrivateRoomConsumer(BaseChatConsumer):
         msg = PrivateRoomMessage.objects.create(
             room=room, sender=user, content=body
         )
+        up = Reaction.objects.filter(private_room_message=msg, value=1).count()
+        down = Reaction.objects.filter(private_room_message=msg, value=-1).count()
         return {
+            "id": msg.id,
             "username": user.username,
             "message": msg.content,
             "timestamp": _ts(msg.created),
+            "full_timestamp": _full_ts(msg.created),
+            "created": msg.created.isoformat(),
+            "user_color": color_for(user),
+            "up": up,
+            "down": down,
+            "mine": 0,
         }, None

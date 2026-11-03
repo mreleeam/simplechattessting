@@ -2,6 +2,8 @@ import secrets
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
+from django_cryptography.fields import encrypt
 
 
 class PrivateChat(models.Model):
@@ -15,6 +17,8 @@ class PrivateChat(models.Model):
         on_delete=models.CASCADE,
         related_name="private_chats_as_user2",
     )
+    user1_hidden = models.BooleanField(default=False)
+    user2_hidden = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -39,6 +43,29 @@ class PrivateChat(models.Model):
 
     def other_user(self, user):
         return self.user2 if self.user1_id == user.pk else self.user1
+
+    def is_hidden_for(self, user):
+        if self.user1_id == user.pk:
+            return self.user1_hidden
+        if self.user2_id == user.pk:
+            return self.user2_hidden
+        return False
+
+    def unhide_for(self, user):
+        if self.user1_id == user.pk and self.user1_hidden:
+            self.user1_hidden = False
+            self.save(update_fields=["user1_hidden"])
+        elif self.user2_id == user.pk and self.user2_hidden:
+            self.user2_hidden = False
+            self.save(update_fields=["user2_hidden"])
+
+    def hide_for(self, user):
+        if self.user1_id == user.pk:
+            self.user1_hidden = True
+            self.save(update_fields=["user1_hidden"])
+        elif self.user2_id == user.pk:
+            self.user2_hidden = True
+            self.save(update_fields=["user2_hidden"])
 
     def __str__(self):
         return f"{self.user1} <-> {self.user2}"
@@ -163,6 +190,52 @@ class Block(models.Model):
         return f"{self.blocker} blocked {self.blocked}"
 
 
+class ReadMarker(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="read_markers",
+    )
+    room = models.ForeignKey(
+        Room,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+    private_room = models.ForeignKey(
+        PrivateRoom,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+    private_chat = models.ForeignKey(
+        PrivateChat,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+    last_read_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "room"),
+                name="unique_read_public_room",
+                condition=models.Q(room__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=("user", "private_room"),
+                name="unique_read_private_room",
+                condition=models.Q(private_room__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=("user", "private_chat"),
+                name="unique_read_private_chat",
+                condition=models.Q(private_chat__isnull=False),
+            ),
+        ]
+
+
 class PrivateChatMessage(models.Model):
     chat = models.ForeignKey(
         PrivateChat,
@@ -173,8 +246,9 @@ class PrivateChatMessage(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
     )
-    content = models.TextField(max_length=4000)
+    content = encrypt(models.TextField(max_length=4000))
     created = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["created"]
@@ -194,8 +268,9 @@ class Message(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
     )
-    content = models.TextField(max_length=4000)
+    content = encrypt(models.TextField(max_length=4000))
     created = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["created"]
@@ -215,8 +290,9 @@ class PrivateRoomMessage(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
     )
-    content = models.TextField(max_length=4000)
+    content = encrypt(models.TextField(max_length=4000))
     created = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["created"]
@@ -224,3 +300,60 @@ class PrivateRoomMessage(models.Model):
 
     def __str__(self):
         return f"{self.sender} @ #{self.room}"
+
+
+class Reaction(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reactions",
+    )
+    value = models.SmallIntegerField()
+    room_message = models.ForeignKey(
+        Message,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reactions",
+    )
+    private_room_message = models.ForeignKey(
+        PrivateRoomMessage,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reactions",
+    )
+    private_chat_message = models.ForeignKey(
+        PrivateChatMessage,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reactions",
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(value__in=[1, -1]),
+                name="reaction_value_valid",
+            ),
+            models.UniqueConstraint(
+                fields=("user", "room_message"),
+                name="unique_reaction_room_msg",
+                condition=models.Q(room_message__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=("user", "private_room_message"),
+                name="unique_reaction_private_room_msg",
+                condition=models.Q(private_room_message__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=("user", "private_chat_message"),
+                name="unique_reaction_private_chat_msg",
+                condition=models.Q(private_chat_message__isnull=False),
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user} {'+' if self.value == 1 else '-'} on reaction {self.id}"
