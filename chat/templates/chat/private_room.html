@@ -18,24 +18,28 @@
   </p>
 
   <div class="room-actions">
-    <form method="post" action="{% url 'chat:delete_private_room_history' room.name %}" class="inline-action"
+    <form method="post" action="{% url 'chat:delete_private_room_history' room.slug %}" class="inline-action"
           data-confirm="Delete all YOUR messages in #{{ room.name }}? Other members keep theirs."
           data-confirm-ok="CLEAR"
           data-confirm-danger="1">
       {% csrf_token %}
       <button class="btn btn-error btn-small">CLEAR MESSAGES</button>
     </form>
+
     {% if is_owner %}
-      <form method="post" action="{% url 'chat:delete_private_room' room.name %}" class="inline-action"
-            data-confirm="Delete this room permanently for everyone?"
-            data-confirm-ok="DELETE"
+      <button type="button" class="btn btn-default btn-small" id="open-token-btn">TOKEN</button>
+      <button type="button" class="btn btn-default btn-small" id="open-admin-btn">ADMIN</button>
+    {% elif is_admin %}
+      <form method="post" action="{% url 'chat:leave_private_room' room.slug %}" class="inline-action"
+            data-confirm="Leave #{{ room.name }}?"
+            data-confirm-ok="LEAVE"
             data-confirm-danger="1">
         {% csrf_token %}
-        <button class="btn btn-error btn-small">DELETE ROOM</button>
+        <button class="btn btn-error btn-small">LEAVE</button>
       </form>
-      <button type="button" class="btn btn-default btn-small" data-toggle="token-panel">TOKEN</button>
+      <button type="button" class="btn btn-default btn-small" id="open-admin-btn">ADMIN</button>
     {% else %}
-      <form method="post" action="{% url 'chat:leave_private_room' room.name %}" class="inline-action"
+      <form method="post" action="{% url 'chat:leave_private_room' room.slug %}" class="inline-action"
             data-confirm="Leave #{{ room.name }}?"
             data-confirm-ok="LEAVE"
             data-confirm-danger="1">
@@ -46,35 +50,47 @@
   </div>
 
   {% if is_owner %}
-    <div id="token-panel" class="collapsible-panel" hidden>
-      <p>
-        <span class="account-label">Invite token</span>
-        <span class="account-separator">&gt;</span>
-      </p>
-      <p>
-        <input type="text" id="invite-token" readonly value="{{ room.invite_token }}" style="width:100%;">
-      </p>
-      <p>
-        <button type="button" class="btn btn-default btn-small" id="copy-invite-btn">COPY TOKEN</button>
-        <form method="post" action="{% url 'chat:rotate_invite' room.name %}" style="display:inline;"
-              data-confirm="Rotate the token? The old one stops working immediately."
-              data-confirm-ok="ROTATE">
-          {% csrf_token %}
-          <button type="submit" class="btn btn-error btn-small">ROTATE TOKEN</button>
-        </form>
-      </p>
-    </div>
+    <script type="application/json" id="invite-token-data">{"token": "{{ room.invite_token|escapejs }}"}</script>
+  {% endif %}
+
+  {% if is_owner or is_admin %}
+    <script type="application/json" id="admin-panel-data">
+      {
+        "slug": "{{ room.slug|escapejs }}",
+        "name": "{{ room.name|escapejs }}",
+        "isOwner": {% if is_owner %}true{% else %}false{% endif %},
+        "isLocked": {% if room.is_locked %}true{% else %}false{% endif %},
+        "ownerId": {{ room.owner_id }},
+        "members": [
+          {% for m in members %}
+            {
+              "username": "{{ m.user.username|escapejs }}",
+              "userId": {{ m.user.pk }},
+              "isAdmin": {% if m.is_admin %}true{% else %}false{% endif %},
+              "isMuted": {% if m.is_muted %}true{% else %}false{% endif %}
+            }{% if not forloop.last %},{% endif %}
+          {% endfor %}
+        ],
+        "banned": [
+          {% for ban in banned_users %}
+            {
+              "username": "{{ ban.user.username|escapejs }}"
+            }{% if not forloop.last %},{% endif %}
+          {% endfor %}
+        ]
+      }
+    </script>
   {% endif %}
 
   <hr>
 
   <div id="chat-log" class="chat-log"
        data-ws-prefix="/ws/chat/pr/"
-       data-room="{{ room.name|escapejs }}"
+       data-room="{{ room.slug }}"
        data-color-mode="palette"
        data-my-username="{{ request.user.username }}"
        data-kind="pr"
-       data-older-url="{% url 'chat:older_private_room_messages' room.name %}">
+       data-older-url="{% url 'chat:older_private_room_messages' room.slug %}">
     {% if has_more %}
       <button type="button" id="load-older-btn" class="load-older-btn">LOAD OLDER MESSAGES</button>
     {% endif %}
@@ -87,8 +103,16 @@
         {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
         {% with mine=my_reactions|dict_get:message.id %}
           <span class="chat-reactions" data-id="{{ message.id }}">
-            <button type="button" class="reaction-btn {% if mine == 1 %}active{% endif %}" data-value="1" title="Thumbs up">👍 <span class="react-up">{{ message.up }}</span></button>
-            <button type="button" class="reaction-btn {% if mine == -1 %}active{% endif %}" data-value="-1" title="Thumbs down">👎 <span class="react-down">{{ message.down }}</span></button>
+            <button type="button"
+                    class="reaction-btn reaction-up {% if message.up > 0 %}has-count{% endif %} {% if mine == 1 %}active{% endif %}"
+                    data-value="1"
+                    data-count="{{ message.up }}"
+                    title="Thumbs up">👍 <span class="react-count">{{ message.up }}</span></button>
+            <button type="button"
+                    class="reaction-btn reaction-down {% if message.down > 0 %}has-count{% endif %} {% if mine == -1 %}active{% endif %}"
+                    data-value="-1"
+                    data-count="{{ message.down }}"
+                    title="Thumbs down">👎 <span class="react-count">{{ message.down }}</span></button>
           </span>
         {% endwith %}
       </p>
@@ -101,7 +125,7 @@
 
   <div class="chat-input">
     <span class="chat-prompt">&gt;</span>
-    <textarea id="chat-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" autocomplete="off" rows="1" maxlength="4000"></textarea>
+    <textarea id="chat-message-input" placeholder="Type a message..." autocomplete="off" rows="1" maxlength="4000"></textarea>
   </div>
 
 </div>
@@ -111,23 +135,250 @@
 {% block scripts %}
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-  document.querySelectorAll("[data-toggle]").forEach(function (btn) {
-    var target = document.getElementById(btn.dataset.toggle);
-    if (!target) return;
-    btn.addEventListener("click", function () {
-      target.hidden = !target.hidden;
-      btn.classList.toggle("btn-active", !target.hidden);
-    });
-  });
 
-  var copyBtn = document.getElementById("copy-invite-btn");
-  var tokenField = document.getElementById("invite-token");
-  if (copyBtn && tokenField) {
-    copyBtn.addEventListener("click", function () {
-      tokenField.select();
-      navigator.clipboard.writeText(tokenField.value);
-      copyBtn.textContent = "COPIED";
-      setTimeout(function () { copyBtn.textContent = "COPY TOKEN"; }, 1500);
+  function postAction(url) {
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        "X-CSRFToken": getCSRF()
+      }
+    }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  function renderAdminHTML(data) {
+    var html = "";
+    html += '<h4>Room lock</h4>';
+    html += '<p>Current: <strong>' + (data.isLocked ? "LOCKED" : "OPEN") + '</strong></p>';
+    html += '<button type="button" class="btn ' + (data.isLocked ? "btn-primary" : "btn-error") + ' btn-small admin-lock-btn">' +
+            (data.isLocked ? "UNLOCK ROOM" : "LOCK ROOM") + '</button>';
+
+    html += '<hr><h4>Members</h4><div class="member-list">';
+    data.members.forEach(function (m) {
+      var isOwner = m.userId === data.ownerId;
+      html += '<div class="member-row">';
+      html += '<span class="member-name">@' + m.username;
+      if (isOwner) html += ' <span class="badge-owner">OWNER</span>';
+      else if (m.isAdmin) html += ' <span class="badge-admin">ADMIN</span>';
+      if (m.isMuted) html += ' <span class="badge-muted">MUTED</span>';
+      html += '</span>';
+
+      if (!isOwner) {
+        html += '<span class="member-actions">';
+        if (data.isOwner || !m.isAdmin) {
+          html += '<button type="button" class="btn btn-small admin-mute-btn" data-username="' + m.username + '" data-muted="' + m.isMuted + '">' +
+                  (m.isMuted ? "UNMUTE" : "MUTE") + '</button>';
+          html += '<button type="button" class="btn btn-error btn-small admin-ban-btn" data-username="' + m.username + '">BAN</button>';
+        }
+        if (data.isOwner && !m.isAdmin) {
+          html += '<button type="button" class="btn btn-small admin-promote-btn" data-username="' + m.username + '">PROMOTE</button>';
+        }
+        if (data.isOwner && m.isAdmin) {
+          html += '<button type="button" class="btn btn-small admin-demote-btn" data-username="' + m.username + '">DEMOTE</button>';
+        }
+        html += '</span>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+
+    if (data.banned && data.banned.length) {
+      html += '<hr><h4>Banned users</h4><div class="member-list">';
+      data.banned.forEach(function (b) {
+        html += '<div class="member-row">';
+        html += '<span class="member-name">@' + b.username + ' <span class="badge-muted">BANNED</span></span>';
+        html += '<span class="member-actions">';
+        html += '<button type="button" class="btn btn-small admin-unban-btn" data-username="' + b.username + '">UNBAN</button>';
+        html += '</span></div>';
+      });
+      html += '</div>';
+    }
+
+    if (data.isOwner) {
+      html += '<hr><h4>Danger zone</h4>';
+      html += '<button type="button" class="btn btn-error btn-small admin-delete-room-btn">DELETE ROOM</button>';
+    }
+
+    return html;
+  }
+
+  function wireAdminActions(wrap, data, refresh) {
+    var slug = data.slug;
+
+    wrap.querySelectorAll(".admin-lock-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var msg = data.isLocked
+          ? "Unlock the room? Regular members will be able to send again."
+          : "Lock the room? Only admins will be able to send.";
+        confirmModal({
+          title: data.isLocked ? "Unlock room" : "Lock room",
+          message: msg,
+          confirmText: data.isLocked ? "UNLOCK" : "LOCK",
+          onResult: function (ok) {
+            if (ok !== true) return;
+            postAction("/chat/pr/" + slug + "/lock/")
+              .then(function (newData) { refresh(newData); })
+              .catch(function () { alertify.error("Could not update lock."); });
+          }
+        });
+      });
+    });
+
+    wrap.querySelectorAll(".admin-mute-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        postAction("/chat/pr/" + slug + "/mute/" + encodeURIComponent(btn.dataset.username) + "/")
+          .then(function (newData) { refresh(newData); })
+          .catch(function () { alertify.error("Could not change mute state."); });
+      });
+    });
+
+    wrap.querySelectorAll(".admin-promote-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        postAction("/chat/pr/" + slug + "/promote/" + encodeURIComponent(btn.dataset.username) + "/")
+          .then(function (newData) { refresh(newData); })
+          .catch(function () { alertify.error("Could not promote."); });
+      });
+    });
+
+    wrap.querySelectorAll(".admin-demote-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        postAction("/chat/pr/" + slug + "/demote/" + encodeURIComponent(btn.dataset.username) + "/")
+          .then(function (newData) { refresh(newData); })
+          .catch(function () { alertify.error("Could not demote."); });
+      });
+    });
+
+    wrap.querySelectorAll(".admin-ban-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        confirmModal({
+          title: "Ban user",
+          message: "Remove and ban @" + btn.dataset.username + "? They will not be able to rejoin with the invite token.",
+          confirmText: "BAN",
+          danger: true,
+          onResult: function (ok) {
+            if (ok !== true) return;
+            postAction("/chat/pr/" + slug + "/remove/" + encodeURIComponent(btn.dataset.username) + "/")
+              .then(function (newData) { refresh(newData); })
+              .catch(function () { alertify.error("Could not ban."); });
+          }
+        });
+      });
+    });
+
+    wrap.querySelectorAll(".admin-unban-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        confirmModal({
+          title: "Unban user",
+          message: "Unban @" + btn.dataset.username + "? They can rejoin with the invite token.",
+          confirmText: "UNBAN",
+          onResult: function (ok) {
+            if (ok !== true) return;
+            postAction("/chat/pr/" + slug + "/unban/" + encodeURIComponent(btn.dataset.username) + "/")
+              .then(function (newData) { refresh(newData); })
+              .catch(function () { alertify.error("Could not unban."); });
+          }
+        });
+      });
+    });
+
+    var deleteBtn = wrap.querySelector(".admin-delete-room-btn");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", function () {
+        confirmModal({
+          title: "Delete room",
+          message: "Delete #" + data.name + " permanently for everyone? This cannot be undone.",
+          confirmText: "DELETE",
+          danger: true,
+          onResult: function (ok) {
+            if (ok !== true) return;
+            var form = document.createElement("form");
+            form.method = "post";
+            form.action = "/chat/pr/" + slug + "/delete/";
+            var csrf = document.createElement("input");
+            csrf.type = "hidden";
+            csrf.name = "csrfmiddlewaretoken";
+            csrf.value = getCSRF();
+            form.appendChild(csrf);
+            document.body.appendChild(form);
+            form.submit();
+          }
+        });
+      });
+    }
+  }
+
+  var openTokenBtn = document.getElementById("open-token-btn");
+  if (openTokenBtn) {
+    openTokenBtn.addEventListener("click", function () {
+      var dataEl = document.getElementById("invite-token-data");
+      var token = "";
+      if (dataEl) {
+        try { token = JSON.parse(dataEl.textContent).token || ""; } catch (e) {}
+      }
+      contentModal({
+        title: "Invite token",
+        message: "Share this token so others can join #{{ room.name|escapejs }}. Rotating it will invalidate the current one.",
+        htmlContent:
+          '<div class="token-row">' +
+            '<input type="text" id="modal-token-field" class="modal-input" readonly value="' + token + '">' +
+            '<button type="button" class="btn btn-default btn-small" id="modal-copy-token">COPY</button>' +
+          '</div>' +
+          '<form method="post" action="{% url "chat:rotate_invite" room.slug %}" style="margin-top:1rem;"' +
+                ' data-confirm="Rotate the token? The old one stops working immediately." data-confirm-ok="ROTATE">' +
+            '<input type="hidden" name="csrfmiddlewaretoken" value="' + getCSRF() + '">' +
+            '<button type="submit" class="btn btn-error btn-small">ROTATE TOKEN</button>' +
+          '</form>',
+        confirmText: null,
+        cancelText: "CLOSE",
+        onOpen: function (wrap) {
+          var field = wrap.querySelector("#modal-token-field");
+          var copyBtn = wrap.querySelector("#modal-copy-token");
+          if (field && copyBtn) {
+            copyBtn.addEventListener("click", function () {
+              field.select();
+              navigator.clipboard.writeText(field.value);
+              copyBtn.textContent = "COPIED";
+              setTimeout(function () { copyBtn.textContent = "COPY"; }, 1500);
+            });
+          }
+        }
+      });
+    });
+  }
+
+  var openAdminBtn = document.getElementById("open-admin-btn");
+  if (openAdminBtn) {
+    openAdminBtn.addEventListener("click", function () {
+      var dataEl = document.getElementById("admin-panel-data");
+      if (!dataEl) return;
+      var data;
+      try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+
+      var wrapRef = null;
+
+      function refresh(newData) {
+        data = newData;
+        if (!wrapRef) return;
+        var content = wrapRef.querySelector(".modal-content");
+        if (!content) return;
+        content.innerHTML = renderAdminHTML(newData);
+        wireAdminActions(wrapRef, newData, refresh);
+      }
+
+      contentModal({
+        title: "Room admin",
+        message: "Manage #" + data.name,
+        htmlContent: renderAdminHTML(data),
+        confirmText: null,
+        cancelText: "CLOSE",
+        onOpen: function (wrap) {
+          wrapRef = wrap;
+          wireAdminActions(wrap, data, refresh);
+        }
+      });
     });
   }
 });

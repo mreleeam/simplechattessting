@@ -23,10 +23,6 @@
     </p>
   </div>
 
-  <div class="kbd-hint">
-    Press <kbd>/</kbd> to focus chat input. <kbd>Esc</kbd> to blur.
-  </div>
-
   <hr>
 
   <h3>PRIVATE MESSAGES</h3>
@@ -40,10 +36,10 @@
   {% if private_chats %}
     <div class="room-list">
       {% for chat in private_chats %}
-        <div class="room-row" data-username="{{ chat.peer.username }}">
-          <span class="presence"></span>
-          <a class="room-link" href="{% url 'chat:private_chat' chat.peer.username %}">
-            @{{ chat.peer.username }}
+        <div class="room-row peer-row" data-username="{{ chat.peer.username }}">
+          <a class="room-link peer-link" href="{% url 'chat:private_chat' chat.peer.username %}">
+            <span class="presence"></span>
+            <span>@{{ chat.peer.username }}</span>
             {% if chat.unread %}<span class="unread-badge">{{ chat.unread }}</span>{% endif %}
           </a>
           <a href="{% url 'chat:profile' chat.peer.username %}" class="btn btn-small">PROFILE</a>
@@ -68,11 +64,11 @@
     <div class="room-list">
       {% for pr in private_rooms %}
         <div class="room-row">
-          <a class="room-link" href="{% url 'chat:private_room' pr.name %}">
+          <a class="room-link" href="{% url 'chat:private_room' pr.slug %}">
             #{{ pr.name }}
             {% if pr.unread %}<span class="unread-badge">{{ pr.unread }}</span>{% endif %}
           </a>
-          <form method="post" action="{% url 'chat:leave_private_room' pr.name %}" class="inline-action"
+          <form method="post" action="{% url 'chat:leave_private_room' pr.slug %}" class="inline-action"
                 data-confirm="Leave #{{ pr.name }}?"
                 data-confirm-ok="LEAVE"
                 data-confirm-danger="1">
@@ -112,11 +108,11 @@
     <div class="room-list">
       {% for room in my_public_rooms %}
         <div class="room-row">
-          <a class="room-link" href="{% url 'chat:room' room.name %}">
+          <a class="room-link" href="{% url 'chat:room' room.slug %}">
             #{{ room.name }}
             {% if room.unread %}<span class="unread-badge">{{ room.unread }}</span>{% endif %}
           </a>
-          <form method="post" action="{% url 'chat:leave_public_room' room.name %}" class="inline-action"
+          <form method="post" action="{% url 'chat:leave_public_room' room.slug %}" class="inline-action"
                 data-confirm="Leave #{{ room.name }}?"
                 data-confirm-ok="LEAVE"
                 data-confirm-danger="1">
@@ -132,4 +128,20 @@
 
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.addEventListener("pageshow", function (e) {
+  if (e.persisted) window.location.reload();
+});
+
+var refreshTimer = null;
+window.refreshChatIndex = function () {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(function () {
+    window.location.reload();
+  }, 200);
+};
+</script>
 {% endblock %}

@@ -8,7 +8,7 @@
 
   <div class="landing-hero">
     <p class="landing-tagline">
-      End-to-end conversations. No noise. No tracking. Just text.
+      A text-only chat platform with encrypted messages, private rooms, and no account requirements beyond a username.
     </p>
 
     {% if request.user.is_authenticated %}
@@ -32,33 +32,45 @@
   <div class="landing-features">
 
     <div class="feature">
-      <div class="feature-icon">◈</div>
-      <h3>PRIVATE MESSAGES</h3>
-      <p>One-on-one conversations. Only you and the other person. No group leaks, no forwarding.</p>
+      <div class="feature-icon">🧊</div>
+      <h3>SIMPLICITY</h3>
+      <p>Text only. No images, no voice, no video, no attachments. A chat app that does one thing well.</p>
     </div>
 
     <div class="feature">
-      <div class="feature-icon">▣</div>
-      <h3>PRIVATE ROOMS</h3>
-      <p>Invite-only spaces with a rotatable token. Kill a leaked link in one click.</p>
+      <div class="feature-icon">🔒</div>
+      <h3>ENCRYPTION</h3>
+      <p>Message content is encrypted at rest. A stolen database backup is unreadable without the encryption key.</p>
     </div>
 
     <div class="feature">
-      <div class="feature-icon">◇</div>
-      <h3>PUBLIC ROOMS</h3>
-      <p>Open discussions. Join or create by name. Leave when you want.</p>
+      <div class="feature-icon">🕵️</div>
+      <h3>NO TRACKING</h3>
+      <p>No email address, no phone number, no analytics scripts, no third-party trackers. Username and password only.</p>
     </div>
 
     <div class="feature">
-      <div class="feature-icon">⌘</div>
-      <h3>YOUR CONTROL</h3>
-      <p>Block, remove, clear history, delete account. Everything is a two-click action.</p>
+      <div class="feature-icon">⚡</div>
+      <h3>SPEED</h3>
+      <p>Messages are delivered over persistent WebSockets. No polling, no page reloads, no perceptible delay.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">🔐</div>
+      <h3>PRIVACY</h3>
+      <p>No profiling, no ad targeting, no data resale. Your conversations are not a product.</p>
+    </div>
+
+    <div class="feature">
+      <div class="feature-icon">💬</div>
+      <h3>CHANNELS</h3>
+      <p>Direct private messages, invite-only private rooms, and open public rooms — all in the same interface.</p>
     </div>
 
   </div>
 
   <div class="landing-footer">
-    <p>Built for text. Runs on Django + Channels.</p>
+    <p>Django · Channels · WebSockets · Encrypted at rest</p>
   </div>
 
 </section>

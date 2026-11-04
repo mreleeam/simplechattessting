@@ -17,10 +17,10 @@
     <span id="connection-status" class="status-disconnected">CONNECTING</span>
   </p>
 
-  <p data-username="{{ other_user.username }}">
+  <p class="peer-info" data-username="{{ other_user.username }}">
     <span class="presence"></span>
-    <a href="{% url 'chat:profile' other_user.username %}" class="room-link" style="padding:0;display:inline;">
-      View @{{ other_user.username }}'s profile →
+    <a href="{% url 'chat:profile' other_user.username %}" class="peer-name">
+      @{{ other_user.username }}
     </a>
   </p>
 
@@ -87,8 +87,16 @@
         {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
         {% with mine=my_reactions|dict_get:message.id %}
           <span class="chat-reactions" data-id="{{ message.id }}">
-            <button type="button" class="reaction-btn {% if mine == 1 %}active{% endif %}" data-value="1" title="Thumbs up">👍 <span class="react-up">{{ message.up }}</span></button>
-            <button type="button" class="reaction-btn {% if mine == -1 %}active{% endif %}" data-value="-1" title="Thumbs down">👎 <span class="react-down">{{ message.down }}</span></button>
+            <button type="button"
+                    class="reaction-btn reaction-up {% if message.up > 0 %}has-count{% endif %} {% if mine == 1 %}active{% endif %}"
+                    data-value="1"
+                    data-count="{{ message.up }}"
+                    title="Thumbs up">👍 <span class="react-count">{{ message.up }}</span></button>
+            <button type="button"
+                    class="reaction-btn reaction-down {% if message.down > 0 %}has-count{% endif %} {% if mine == -1 %}active{% endif %}"
+                    data-value="-1"
+                    data-count="{{ message.down }}"
+                    title="Thumbs down">👎 <span class="react-count">{{ message.down }}</span></button>
           </span>
         {% endwith %}
       </p>
@@ -103,7 +111,7 @@
 
   <div class="chat-input">
     <span class="chat-prompt">&gt;</span>
-    <textarea id="chat-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" autocomplete="off" rows="1" maxlength="4000"
+    <textarea id="chat-message-input" placeholder="Type a message..." autocomplete="off" rows="1" maxlength="4000"
               {% if is_blocked or blocked_by_them %}disabled{% endif %}></textarea>
   </div>
 

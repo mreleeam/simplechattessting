@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
@@ -15,6 +17,7 @@ from .models import (
     PrivateChat,
     PrivateChatMessage,
     PrivateRoom,
+    PrivateRoomBan,
     PrivateRoomMember,
     PrivateRoomMessage,
     PublicRoomMember,
@@ -35,6 +38,57 @@ def _with_reactions(qs):
         up=Count("reactions", filter=Q(reactions__value=1)),
         down=Count("reactions", filter=Q(reactions__value=-1)),
     )
+
+
+def _admin_required(room, user):
+    if room.owner_id == user.pk:
+        return True
+    m = room.membership(user)
+    return m is not None and m.is_admin
+
+
+def _is_ajax(request):
+    return request.META.get("HTTP_X_REQUESTED_WITH", "").lower() == "xmlhttprequest"
+
+
+def _push_event(user_ids, event_type, slug="", name="", kind=""):
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    payload = {
+        "type": "room_event",
+        "event_type": event_type,
+        "slug": slug,
+        "name": name,
+        "kind": kind,
+    }
+    for uid in user_ids:
+        async_to_sync(layer.group_send)(f"user_events_{uid}", payload)
+
+
+def _room_snapshot(room, viewer):
+    members = [
+        {
+            "username": m.user.username,
+            "userId": m.user.pk,
+            "isAdmin": m.is_admin,
+            "isMuted": m.is_muted,
+        }
+        for m in room.members.select_related("user").order_by("user__username")
+    ]
+    banned = [
+        {"username": b.user.username}
+        for b in room.bans.select_related("user").order_by("user__username")
+    ]
+    return {
+        "slug": room.slug,
+        "name": room.name,
+        "isOwner": room.owner_id == viewer.pk,
+        "isLocked": room.is_locked,
+        "ownerId": room.owner_id,
+        "members": members,
+        "banned": banned,
+    }
 
 
 def _touch_public(room, user):
@@ -147,8 +201,8 @@ def index(request):
 
 
 @login_required
-def room(request, room_name):
-    room = get_object_or_404(Room, name=room_name)
+def room(request, slug):
+    room = get_object_or_404(Room, slug=slug)
     PublicRoomMember.objects.get_or_create(room=room, user=request.user)
     _touch_public(room, request.user)
     qs = _with_reactions(
@@ -178,8 +232,8 @@ def room(request, room_name):
 
 
 @login_required
-def older_public_messages(request, room_name):
-    room = get_object_or_404(Room, name=room_name)
+def older_public_messages(request, slug):
+    room = get_object_or_404(Room, slug=slug)
     before = request.GET.get("before")
     qs = room.messages.select_related("sender").order_by("-id")
     if before:
@@ -193,50 +247,11 @@ def older_public_messages(request, room_name):
 
 
 @login_required
-def older_private_room_messages(request, room_name):
-    room = get_object_or_404(PrivateRoom, name=room_name)
-    if not PrivateRoomMember.objects.filter(room=room, user=request.user).exists():
-        return JsonResponse({"messages": [], "has_more": False})
-    before = request.GET.get("before")
-    qs = PrivateRoomMessage.objects.filter(room=room).select_related("sender").order_by("-id")
-    if before:
-        qs = qs.filter(id__lt=int(before))
-    page = list(qs[:PAGE_SIZE])
-    page.reverse()
-    return JsonResponse({
-        "messages": [_serialize(m) for m in page],
-        "has_more": len(page) == PAGE_SIZE,
-    })
-
-
-@login_required
-def older_private_chat_messages(request, username):
-    other_user = get_object_or_404(User, username=username)
-    low, high = (
-        (request.user, other_user)
-        if request.user.pk < other_user.pk
-        else (other_user, request.user)
-    )
-    chat = PrivateChat.objects.filter(user1=low, user2=high).first()
-    if not chat:
-        return JsonResponse({"messages": [], "has_more": False})
-    before = request.GET.get("before")
-    qs = chat.messages.select_related("sender").order_by("-id")
-    if before:
-        qs = qs.filter(id__lt=int(before))
-    page = list(qs[:PAGE_SIZE])
-    page.reverse()
-    return JsonResponse({
-        "messages": [_serialize(m) for m in page],
-        "has_more": len(page) == PAGE_SIZE,
-    })
-
-
-@login_required
 @require_POST
-def leave_public_room(request, room_name):
-    room = get_object_or_404(Room, name=room_name)
+def leave_public_room(request, slug):
+    room = get_object_or_404(Room, slug=slug)
     PublicRoomMember.objects.filter(room=room, user=request.user).delete()
+    _push_event([request.user.pk], "refresh_index")
     messages.success(request, f"Left #{room.name}.")
     return redirect("chat:index")
 
@@ -250,25 +265,31 @@ def join_or_create_public_room(request):
         messages.error(request, err)
         return redirect("chat:index")
 
-    room, created = Room.objects.get_or_create(name=name)
+    room = Room.objects.filter(name=name).first()
+    created = False
+    if not room:
+        room = Room.objects.create(name=name)
+        created = True
+
     PublicRoomMember.objects.get_or_create(room=room, user=request.user)
+    _push_event([request.user.pk], "refresh_index")
     if created:
         messages.success(request, f"Public room #{name} created.")
     else:
         messages.success(request, f"Joined #{name}.")
-    return redirect("chat:room", room_name=room.name)
+    return redirect("chat:room", slug=room.slug)
 
 
 @login_required
 @require_POST
-def delete_public_history(request, room_name):
-    room = get_object_or_404(Room, name=room_name)
+def delete_public_history(request, slug):
+    room = get_object_or_404(Room, slug=slug)
     if not PublicRoomMember.objects.filter(room=room, user=request.user).exists():
         messages.error(request, "You are not a member of this room.")
         return redirect("chat:index")
     Message.objects.filter(room=room, sender=request.user).delete()
     messages.success(request, f"Deleted your messages in #{room.name}.")
-    return redirect("chat:room", room_name=room.name)
+    return redirect("chat:room", slug=room.slug)
 
 
 @login_required
@@ -294,6 +315,7 @@ def create_private_chat(request):
 
     chat = PrivateChat.between(request.user, target)
     chat.unhide_for(request.user)
+    _push_event([request.user.pk, target.pk], "refresh_index")
     return redirect("chat:private_chat", username=target.username)
 
 
@@ -356,6 +378,29 @@ def private_chat(request, username):
 
 
 @login_required
+def older_private_chat_messages(request, username):
+    other_user = get_object_or_404(User, username=username)
+    low, high = (
+        (request.user, other_user)
+        if request.user.pk < other_user.pk
+        else (other_user, request.user)
+    )
+    chat = PrivateChat.objects.filter(user1=low, user2=high).first()
+    if not chat:
+        return JsonResponse({"messages": [], "has_more": False})
+    before = request.GET.get("before")
+    qs = chat.messages.select_related("sender").order_by("-id")
+    if before:
+        qs = qs.filter(id__lt=int(before))
+    page = list(qs[:PAGE_SIZE])
+    page.reverse()
+    return JsonResponse({
+        "messages": [_serialize(m) for m in page],
+        "has_more": len(page) == PAGE_SIZE,
+    })
+
+
+@login_required
 @require_POST
 def remove_private_chat(request, username):
     other_user = get_object_or_404(User, username=username)
@@ -367,31 +412,9 @@ def remove_private_chat(request, username):
     chat = PrivateChat.objects.filter(user1=low, user2=high).first()
     if chat:
         chat.hide_for(request.user)
+    _push_event([request.user.pk], "refresh_index")
     messages.success(request, f"Removed conversation with @{other_user.username}.")
     return redirect("chat:index")
-
-
-@login_required
-def profile(request, username):
-    target = get_object_or_404(User, username=username)
-    is_self = target.pk == request.user.pk
-    is_blocked = Block.objects.filter(
-        blocker=request.user, blocked=target
-    ).exists()
-    try:
-        profile_obj = target.profile
-    except Exception:
-        profile_obj = None
-    return render(
-        request,
-        "chat/profile.html",
-        {
-            "target": target,
-            "is_self": is_self,
-            "is_blocked": is_blocked,
-            "profile": profile_obj,
-        },
-    )
 
 
 @login_required
@@ -401,6 +424,7 @@ def block_user(request, username):
     if target == request.user:
         return redirect("chat:index")
     Block.objects.get_or_create(blocker=request.user, blocked=target)
+    _push_event([request.user.pk, target.pk], "refresh_index")
     messages.success(request, f"Blocked @{target.username}.")
     return redirect("chat:profile", username=target.username)
 
@@ -410,6 +434,7 @@ def block_user(request, username):
 def unblock_user(request, username):
     target = get_object_or_404(User, username=username)
     Block.objects.filter(blocker=request.user, blocked=target).delete()
+    _push_event([request.user.pk, target.pk], "refresh_index")
     messages.success(request, f"Unblocked @{target.username}.")
     return redirect("chat:profile", username=target.username)
 
@@ -439,23 +464,21 @@ def create_private_room(request):
         messages.error(request, err)
         return redirect("chat:index")
 
-    if PrivateRoom.objects.filter(name=name).exists():
-        messages.error(request, "Room already exists.")
-        return redirect("chat:index")
-
     room = PrivateRoom.objects.create(name=name, owner=request.user)
     PrivateRoomMember.objects.create(room=room, user=request.user)
+    _push_event([request.user.pk], "refresh_index")
     messages.success(request, f"Private room #{name} created.")
-    return redirect("chat:private_room", room_name=name)
+    return redirect("chat:private_room", slug=room.slug)
 
 
 @login_required
-def private_room(request, room_name):
-    room = get_object_or_404(PrivateRoom, name=room_name)
-    is_member = room.is_member(request.user)
+def private_room(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    membership = room.membership(request.user)
     is_owner = room.owner_id == request.user.pk
+    is_admin = is_owner or (membership is not None and membership.is_admin)
 
-    if not is_member:
+    if membership is None:
         return render(
             request,
             "chat/join_private_room.html",
@@ -480,12 +503,19 @@ def private_room(request, room_name):
         ).values_list("private_room_message_id", "value")
     )
 
+    members = room.members.select_related("user").order_by("user__username")
+    banned_users = room.bans.select_related("user").order_by("user__username")
+
     return render(
         request,
         "chat/private_room.html",
         {
             "room": room,
             "is_owner": is_owner,
+            "is_admin": is_admin,
+            "my_membership": membership,
+            "members": members,
+            "banned_users": banned_users,
             "chat_messages": messages_page,
             "has_more": has_more,
             "my_reactions": my_reactions,
@@ -494,39 +524,333 @@ def private_room(request, room_name):
 
 
 @login_required
+def older_private_room_messages(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if not PrivateRoomMember.objects.filter(room=room, user=request.user).exists():
+        return JsonResponse({"messages": [], "has_more": False})
+    before = request.GET.get("before")
+    qs = PrivateRoomMessage.objects.filter(room=room).select_related("sender").order_by("-id")
+    if before:
+        qs = qs.filter(id__lt=int(before))
+    page = list(qs[:PAGE_SIZE])
+    page.reverse()
+    return JsonResponse({
+        "messages": [_serialize(m) for m in page],
+        "has_more": len(page) == PAGE_SIZE,
+    })
+
+
+@login_required
 @require_POST
-def leave_private_room(request, room_name):
-    room = get_object_or_404(PrivateRoom, name=room_name)
+def leave_private_room(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
     if room.owner_id == request.user.pk:
         messages.error(request, "Owner cannot leave. Delete the room first.")
-        return redirect("chat:private_room", room_name=room.name)
+        return redirect("chat:private_room", slug=room.slug)
     PrivateRoomMember.objects.filter(room=room, user=request.user).delete()
+    _push_event([request.user.pk], "refresh_index")
     messages.success(request, f"Left #{room.name}.")
     return redirect("chat:index")
 
 
 @login_required
 @require_POST
-def delete_private_room_history(request, room_name):
-    room = get_object_or_404(PrivateRoom, name=room_name)
+def delete_private_room_history(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
     if not PrivateRoomMember.objects.filter(room=room, user=request.user).exists():
         messages.error(request, "You are not a member of this room.")
         return redirect("chat:index")
     PrivateRoomMessage.objects.filter(room=room, sender=request.user).delete()
     messages.success(request, f"Deleted your messages in #{room.name}.")
-    return redirect("chat:private_room", room_name=room.name)
+    return redirect("chat:private_room", slug=room.slug)
 
 
 @login_required
 @require_POST
-def delete_private_room(request, room_name):
-    room = get_object_or_404(PrivateRoom, name=room_name)
+def delete_private_room(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
     if room.owner_id != request.user.pk:
         messages.error(request, "Only the room owner can delete it.")
-        return redirect("chat:private_room", room_name=room.name)
+        return redirect("chat:private_room", slug=room.slug)
+    member_ids = list(room.members.values_list("user_id", flat=True))
     room.delete()
-    messages.success(request, f"Deleted #{room_name}.")
+    _push_event(member_ids, "refresh_index")
+    messages.success(request, f"Deleted #{room.name}.")
     return redirect("chat:index")
+
+
+@login_required
+@require_POST
+def rotate_invite(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if room.owner_id != request.user.pk:
+        messages.error(request, "Only the room owner can rotate the invite token.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    room.rotate_invite_token()
+    messages.success(request, "Invite token rotated. Old token is dead.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def toggle_room_lock(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if not _admin_required(room, request.user):
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only admins can do that."}, status=403)
+        messages.error(request, "Only admins can do that.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    room.is_locked = not room.is_locked
+    room.save(update_fields=["is_locked"])
+    _push_event(list(room.members.values_list("user_id", flat=True)), "refresh_room", slug=room.slug, name=room.name)
+
+    if _is_ajax(request):
+        return JsonResponse(_room_snapshot(room, request.user))
+
+    messages.success(
+        request,
+        "Room locked. Only admins can send." if room.is_locked else "Room unlocked.",
+    )
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def mute_member(request, slug, username):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if not _admin_required(room, request.user):
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only admins can do that."}, status=403)
+        messages.error(request, "Only admins can do that.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target = get_object_or_404(User, username=username)
+    if target.pk == room.owner_id:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Cannot mute the owner."}, status=400)
+        messages.error(request, "Cannot mute the owner.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m = room.membership(target)
+    if not target_m:
+        if _is_ajax(request):
+            return JsonResponse({"error": "User is not a member."}, status=400)
+        return redirect("chat:private_room", slug=room.slug)
+
+    if target_m.is_admin and room.owner_id != request.user.pk:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only the owner can mute admins."}, status=403)
+        messages.error(request, "Only the owner can mute admins.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m.is_muted = not target_m.is_muted
+    target_m.save(update_fields=["is_muted"])
+    _push_event([target.pk], "refresh_room", slug=room.slug, name=room.name)
+
+    if _is_ajax(request):
+        return JsonResponse(_room_snapshot(room, request.user))
+
+    messages.success(
+        request,
+        f"{'Muted' if target_m.is_muted else 'Unmuted'} @{target.username}.",
+    )
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def remove_member(request, slug, username):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if not _admin_required(room, request.user):
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only admins can do that."}, status=403)
+        messages.error(request, "Only admins can do that.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target = get_object_or_404(User, username=username)
+    if target.pk == room.owner_id:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Cannot remove the owner."}, status=400)
+        messages.error(request, "Cannot remove the owner.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m = room.membership(target)
+    if not target_m:
+        if _is_ajax(request):
+            return JsonResponse({"error": "User is not a member."}, status=400)
+        return redirect("chat:private_room", slug=room.slug)
+
+    if target_m.is_admin and room.owner_id != request.user.pk:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only the owner can remove admins."}, status=403)
+        messages.error(request, "Only the owner can remove admins.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    PrivateRoomBan.objects.get_or_create(
+        room=room, user=target, defaults={"banned_by": request.user}
+    )
+    target_m.delete()
+    _push_event([target.pk], "refresh_index")
+
+    if _is_ajax(request):
+        return JsonResponse(_room_snapshot(room, request.user))
+
+    messages.success(request, f"Removed and banned @{target.username}.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def unban_member(request, slug, username):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if not _admin_required(room, request.user):
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only admins can do that."}, status=403)
+        messages.error(request, "Only admins can do that.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target = get_object_or_404(User, username=username)
+    PrivateRoomBan.objects.filter(room=room, user=target).delete()
+    _push_event([target.pk], "refresh_index")
+
+    if _is_ajax(request):
+        return JsonResponse(_room_snapshot(room, request.user))
+
+    messages.success(request, f"Unbanned @{target.username}.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def promote_member(request, slug, username):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if room.owner_id != request.user.pk:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only the owner can promote."}, status=403)
+        messages.error(request, "Only the owner can promote.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target = get_object_or_404(User, username=username)
+    if target.pk == room.owner_id:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Cannot promote the owner."}, status=400)
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m = room.membership(target)
+    if not target_m:
+        if _is_ajax(request):
+            return JsonResponse({"error": "User is not a member."}, status=400)
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m.is_admin = True
+    target_m.save(update_fields=["is_admin"])
+    _push_event([target.pk], "refresh_index")
+
+    if _is_ajax(request):
+        return JsonResponse(_room_snapshot(room, request.user))
+
+    messages.success(request, f"Promoted @{target.username} to admin.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def demote_member(request, slug, username):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if room.owner_id != request.user.pk:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Only the owner can demote admins."}, status=403)
+        messages.error(request, "Only the owner can demote admins.")
+        return redirect("chat:private_room", slug=room.slug)
+
+    target = get_object_or_404(User, username=username)
+    if target.pk == room.owner_id:
+        if _is_ajax(request):
+            return JsonResponse({"error": "Cannot demote the owner."}, status=400)
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m = room.membership(target)
+    if not target_m:
+        if _is_ajax(request):
+            return JsonResponse({"error": "User is not a member."}, status=400)
+        return redirect("chat:private_room", slug=room.slug)
+
+    target_m.is_admin = False
+    target_m.save(update_fields=["is_admin"])
+    _push_event([target.pk], "refresh_index")
+
+    if _is_ajax(request):
+        return JsonResponse(_room_snapshot(room, request.user))
+
+    messages.success(request, f"Demoted @{target.username}.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+def join_via_invite(request, token):
+    room = get_object_or_404(PrivateRoom, invite_token=token)
+    if PrivateRoomBan.objects.filter(room=room, user=request.user).exists():
+        messages.error(request, "You are banned from this room.")
+        return redirect("chat:index")
+    _, created = PrivateRoomMember.objects.get_or_create(
+        room=room, user=request.user
+    )
+    if created:
+        _push_event([request.user.pk], "refresh_index")
+        messages.success(request, f"Joined #{room.name}.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+@require_POST
+def join_by_link(request):
+    raw = (request.POST.get("invite_link") or "").strip()
+    if not raw:
+        messages.error(request, "Paste an invite token.")
+        return redirect("chat:index")
+
+    token = raw.rstrip("/").rsplit("/", 1)[-1]
+    room = PrivateRoom.objects.filter(invite_token=token).first()
+    if not room:
+        messages.error(request, "Invalid or expired invite token.")
+        return redirect("chat:index")
+
+    if PrivateRoomBan.objects.filter(room=room, user=request.user).exists():
+        messages.error(request, "You are banned from this room.")
+        return redirect("chat:index")
+
+    _, created = PrivateRoomMember.objects.get_or_create(
+        room=room, user=request.user
+    )
+    if created:
+        _push_event([request.user.pk], "refresh_index")
+        messages.success(request, f"Joined #{room.name}.")
+    return redirect("chat:private_room", slug=room.slug)
+
+
+@login_required
+def profile(request, username):
+    target = get_object_or_404(User, username=username)
+    is_self = target.pk == request.user.pk
+    is_blocked = Block.objects.filter(
+        blocker=request.user, blocked=target
+    ).exists()
+    try:
+        profile_obj = target.profile
+    except Exception:
+        profile_obj = None
+    return render(
+        request,
+        "chat/profile.html",
+        {
+            "target": target,
+            "is_self": is_self,
+            "is_blocked": is_blocked,
+            "profile": profile_obj,
+        },
+    )
 
 
 @login_required
@@ -644,71 +968,3 @@ def react_message(request):
         "up": up,
         "down": down,
     })
-
-
-@login_required
-def message_reactions(request):
-    msg_id = request.GET.get("id")
-    kind = request.GET.get("kind")
-    field = {
-        "room": "room_message",
-        "pr": "private_room_message",
-        "pc": "private_chat_message",
-    }.get(kind)
-    if not field:
-        return JsonResponse({"error": "Invalid kind"}, status=400)
-
-    up = Reaction.objects.filter(value=1, **{field + "_id": msg_id}).count()
-    down = Reaction.objects.filter(value=-1, **{field + "_id": msg_id}).count()
-    mine = (
-        Reaction.objects.filter(user=request.user, **{field + "_id": msg_id})
-        .values_list("value", flat=True)
-        .first()
-    )
-    return JsonResponse({"up": up, "down": down, "mine": mine or 0})
-
-
-@login_required
-def join_via_invite(request, token):
-    room = get_object_or_404(PrivateRoom, invite_token=token)
-    _, created = PrivateRoomMember.objects.get_or_create(
-        room=room, user=request.user
-    )
-    if created:
-        messages.success(request, f"Joined #{room.name}.")
-    return redirect("chat:private_room", room_name=room.name)
-
-
-@login_required
-@require_POST
-def join_by_link(request):
-    raw = (request.POST.get("invite_link") or "").strip()
-    if not raw:
-        messages.error(request, "Paste an invite token.")
-        return redirect("chat:index")
-
-    token = raw.rstrip("/").rsplit("/", 1)[-1]
-    room = PrivateRoom.objects.filter(invite_token=token).first()
-    if not room:
-        messages.error(request, "Invalid or expired invite token.")
-        return redirect("chat:index")
-
-    _, created = PrivateRoomMember.objects.get_or_create(
-        room=room, user=request.user
-    )
-    if created:
-        messages.success(request, f"Joined #{room.name}.")
-    return redirect("chat:private_room", room_name=room.name)
-
-
-@login_required
-@require_POST
-def rotate_invite(request, room_name):
-    room = get_object_or_404(PrivateRoom, name=room_name)
-    if room.owner_id != request.user.pk:
-        messages.error(request, "Only the room owner can rotate the invite token.")
-        return redirect("chat:private_room", room_name=room.name)
-
-    room.rotate_invite_token()
-    messages.success(request, "Invite token rotated. Old token is dead.")
-    return redirect("chat:private_room", room_name=room.name)

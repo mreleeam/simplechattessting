@@ -6,15 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Secure Chat{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'css/vendor/alertify.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/vendor/semantic.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/vendor/terminal.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
 <body class="terminal">
 
 <nav class="topbar">
   <a href="{% url 'home' %}" class="brand">
-    Secure<span class="brand-brace">{</span>chat<span class="brand-brace">}</span>
+    Simple<span class="brand-brace">{</span>chat<span class="brand-brace">}</span>
   </a>
 
   <div class="topbar-right">
@@ -53,6 +51,7 @@
 <script src="{% static 'js/vendor/alertify.min.js' %}"></script>
 <script src="{% static 'js/confirm.js' %}"></script>
 <script src="{% static 'js/presence.js' %}"></script>
+<script src="{% static 'js/events.js' %}"></script>
 <script src="{% static 'js/chat.js' %}"></script>
 
 <script>

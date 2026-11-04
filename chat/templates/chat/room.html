@@ -18,14 +18,14 @@
   </p>
 
   <div class="room-actions">
-    <form method="post" action="{% url 'chat:leave_public_room' room.name %}" class="inline-action"
+    <form method="post" action="{% url 'chat:leave_public_room' room.slug %}" class="inline-action"
           data-confirm="Leave #{{ room.name }}?"
           data-confirm-ok="LEAVE"
           data-confirm-danger="1">
       {% csrf_token %}
       <button class="btn btn-error btn-small">LEAVE</button>
     </form>
-    <form method="post" action="{% url 'chat:delete_public_history' room.name %}" class="inline-action"
+    <form method="post" action="{% url 'chat:delete_public_history' room.slug %}" class="inline-action"
           data-confirm="Delete all YOUR messages in #{{ room.name }}? Other users keep theirs."
           data-confirm-ok="CLEAR"
           data-confirm-danger="1">
@@ -38,11 +38,11 @@
 
   <div id="chat-log" class="chat-log"
        data-ws-prefix="/ws/chat/r/"
-       data-room="{{ room.name|escapejs }}"
+       data-room="{{ room.slug }}"
        data-color-mode="palette"
        data-my-username="{{ request.user.username }}"
        data-kind="room"
-       data-older-url="{% url 'chat:older_public_messages' room.name %}">
+       data-older-url="{% url 'chat:older_public_messages' room.slug %}">
     {% if has_more %}
       <button type="button" id="load-older-btn" class="load-older-btn">LOAD OLDER MESSAGES</button>
     {% endif %}
@@ -77,7 +77,7 @@
 
   <div class="chat-input">
     <span class="chat-prompt">&gt;</span>
-    <textarea id="chat-message-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" autocomplete="off" rows="1" maxlength="4000"></textarea>
+    <textarea id="chat-message-input" placeholder="Type a message..." autocomplete="off" rows="1" maxlength="4000"></textarea>
   </div>
 
 </div>

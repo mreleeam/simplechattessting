@@ -75,8 +75,15 @@ def _new_token():
     return secrets.token_urlsafe(24)
 
 
+def _new_slug():
+    return secrets.token_urlsafe(12)
+
+
 class PrivateRoom(models.Model):
-    name = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=64)
+    slug = models.CharField(
+        max_length=32, unique=True, default=_new_slug, editable=False
+    )
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -84,6 +91,7 @@ class PrivateRoom(models.Model):
     invite_token = models.CharField(
         max_length=64, unique=True, default=_new_token, editable=False
     )
+    is_locked = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
 
     def rotate_invite_token(self):
@@ -93,6 +101,18 @@ class PrivateRoom(models.Model):
 
     def is_member(self, user):
         return self.members.filter(user=user).exists()
+
+    def membership(self, user):
+        return self.members.filter(user=user).first()
+
+    def is_admin(self, user):
+        if self.owner_id == user.pk:
+            return True
+        m = self.membership(user)
+        return m is not None and m.is_admin
+
+    def is_owner(self, user):
+        return self.owner_id == user.pk
 
     def __str__(self):
         return f"#{self.name}"
@@ -108,6 +128,8 @@ class PrivateRoomMember(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
     )
+    is_admin = models.BooleanField(default=False)
+    is_muted = models.BooleanField(default=False)
     joined = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -122,9 +144,40 @@ class PrivateRoomMember(models.Model):
         return f"{self.user} in {self.room}"
 
 
+class PrivateRoomBan(models.Model):
+    room = models.ForeignKey(
+        PrivateRoom,
+        on_delete=models.CASCADE,
+        related_name="bans",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+    )
+    banned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bans_issued",
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("room", "user"),
+                name="unique_private_room_ban",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user} banned from {self.room}"
+
+
 class Room(models.Model):
-    name = models.CharField(max_length=64, unique=True)
-    is_private = models.BooleanField(default=False)
+    name = models.CharField(max_length=64)
+    slug = models.CharField(
+        max_length=32, unique=True, default=_new_slug, editable=False
+    )
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:

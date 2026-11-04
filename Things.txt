@@ -1,0 +1,15 @@
+1- change the main page texts and squares and the footer
+
+2- increase chat, account and logout buttons font
+
+3- fix still no message after sending message in the chat box
+
+4- if owner promote a user, that user need ti refresh to see its own admin panel
+
+5- if a user get into the room, the owner or the admins should refresh to see that also as the user leaves
+
+6- if a user join the room or the private room it should print the user x entered the room also for leaves 
+
+7- when you click on clear messages it should delete the whole messages only for your account, your and others messages will be in group but wont be showed to you from that any messages before that deletion for all private message, privateroom and also publicroom 
+
+

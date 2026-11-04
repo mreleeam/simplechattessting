@@ -52,6 +52,10 @@ def _full_ts(dt):
     return timezone.localtime(dt).strftime("%d %b %Y %H:%M")
 
 
+def user_group(user_id):
+    return f"user_events_{user_id}"
+
+
 class PresenceConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         user = self.scope["user"]
@@ -92,6 +96,33 @@ class PresenceConsumer(AsyncWebsocketConsumer):
             "type": "presence",
             "username": event["username"],
             "online": event["online"],
+        }))
+
+
+class RoomEventConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        user = self.scope["user"]
+        if not user.is_authenticated:
+            await self.close(code=4001)
+            return
+        self.user = user
+        self.group_name = user_group(user.pk)
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, "group_name"):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        pass
+
+    async def room_event(self, event):
+        await self.send(text_data=json.dumps({
+            "type": event.get("event_type", "room_event"),
+            "slug": event.get("slug", ""),
+            "name": event.get("name", ""),
+            "kind": event.get("kind", ""),
         }))
 
 
@@ -260,17 +291,17 @@ class ChatConsumer(BaseChatConsumer):
     reaction_field = "room_message"
 
     async def connect(self):
-        self.identity = self.scope["url_route"]["kwargs"]["room_name"]
+        self.identity = self.scope["url_route"]["kwargs"]["slug"]
         await super().connect()
 
     @database_sync_to_async
     def allow_connect(self, user):
-        return Room.objects.filter(name=self.identity).exists()
+        return Room.objects.filter(slug=self.identity).exists()
 
     @database_sync_to_async
     def persist(self, user, body):
         try:
-            room = Room.objects.get(name=self.identity)
+            room = Room.objects.get(slug=self.identity)
         except Room.DoesNotExist:
             return None, "Room no longer exists."
         msg = Message.objects.create(room=room, sender=user, content=body)
@@ -347,23 +378,37 @@ class PrivateRoomConsumer(BaseChatConsumer):
     reaction_field = "private_room_message"
 
     async def connect(self):
-        self.identity = self.scope["url_route"]["kwargs"]["room_name"]
+        self.identity = self.scope["url_route"]["kwargs"]["slug"]
         await super().connect()
 
     @database_sync_to_async
     def allow_connect(self, user):
         return PrivateRoomMember.objects.filter(
-            room__name=self.identity, user=user
+            room__slug=self.identity, user=user
         ).exists()
 
     @database_sync_to_async
     def persist(self, user, body):
         try:
-            room = PrivateRoom.objects.get(name=self.identity)
+            room = PrivateRoom.objects.get(slug=self.identity)
         except PrivateRoom.DoesNotExist:
             return None, "Room no longer exists."
-        if not PrivateRoomMember.objects.filter(room=room, user=user).exists():
+
+        membership = PrivateRoomMember.objects.filter(
+            room=room, user=user
+        ).first()
+        if not membership:
             return None, "You are no longer a member of this room."
+
+        is_owner = room.owner_id == user.pk
+        is_admin = is_owner or membership.is_admin
+
+        if membership.is_muted and not is_admin:
+            return None, "You are muted in this room."
+
+        if room.is_locked and not is_admin:
+            return None, "Room is locked. Only admins can send messages."
+
         msg = PrivateRoomMessage.objects.create(
             room=room, sender=user, content=body
         )

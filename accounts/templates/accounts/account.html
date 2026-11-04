@@ -9,7 +9,7 @@ Account
 <div class="account-card">
 
   <h1 class="terminal-title">
-    ACCOUNT...<span class="cursor">|</span>
+    ACCOUNT<span class="cursor">|</span>
   </h1>
 
   <div class="account-info">
@@ -92,38 +92,6 @@ Account
 
     </div>
 
-    <div id="change-password-form" class="hidden-form">
-
-      <hr>
-
-      <form method="post" action="{% url 'change_password' %}">
-        {% csrf_token %}
-        <p><input type="password" name="current_password" placeholder="Current Password" required></p>
-        <p><input type="password" name="new_password" placeholder="New Password" required></p>
-        <p><input type="password" name="confirm_password" placeholder="Confirm New Password" required></p>
-        <button type="submit" class="btn btn-default">UPDATE PASSWORD</button>
-      </form>
-
-    </div>
-
-    <div id="delete-account-form" class="hidden-form">
-
-      <hr>
-
-      <h3>DELETE ACCOUNT</h3>
-
-      <form method="post" action="{% url 'delete_account' %}"
-            data-confirm="Delete your account permanently? This cannot be undone."
-            data-confirm-ok="DELETE"
-            data-confirm-danger="1">
-        {% csrf_token %}
-        <p><input type="password" name="password" placeholder="Current Password" required></p>
-        <p><input type="text" name="confirmation" placeholder="Type DELETE" autocomplete="off" required></p>
-        <button type="submit" class="btn btn-error">CONFIRM DELETE</button>
-      </form>
-
-    </div>
-
   </div>
 
   <hr>
@@ -145,34 +113,48 @@ Account
 
 </div>
 
+{% endblock %}
+
+{% block scripts %}
 <script>
-document.addEventListener("DOMContentLoaded", () => {
-    const changeButton = document.getElementById("change-password-btn");
-    const deleteButton = document.getElementById("delete-account-btn");
-    const changeForm = document.getElementById("change-password-form");
-    const deleteForm = document.getElementById("delete-account-form");
-
-    changeForm.style.display = "none";
-    deleteForm.style.display = "none";
-
-    changeButton.addEventListener("click", () => {
-        if (changeForm.style.display === "none") {
-            changeForm.style.display = "block";
-            deleteForm.style.display = "none";
-        } else {
-            changeForm.style.display = "none";
-        }
+document.addEventListener("DOMContentLoaded", function () {
+  var changeBtn = document.getElementById("change-password-btn");
+  if (changeBtn) {
+    changeBtn.addEventListener("click", function () {
+      formModal({
+        title: "Change password",
+        message: "Enter your current password and choose a new one.",
+        action: "{% url 'change_password' %}",
+        csrf: getCSRF(),
+        fields: [
+          { name: "current_password", label: "Current password", type: "password", required: true },
+          { name: "new_password", label: "New password", type: "password", required: true },
+          { name: "confirm_password", label: "Confirm new password", type: "password", required: true }
+        ],
+        confirmText: "UPDATE PASSWORD",
+        cancelText: "CANCEL"
+      });
     });
+  }
 
-    deleteButton.addEventListener("click", () => {
-        if (deleteForm.style.display === "none") {
-            deleteForm.style.display = "block";
-            changeForm.style.display = "none";
-        } else {
-            deleteForm.style.display = "none";
-        }
+  var deleteBtn = document.getElementById("delete-account-btn");
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", function () {
+      formModal({
+        title: "Delete account",
+        message: "This permanently deletes your account and all your messages. There is no undo. Enter your password and type DELETE to confirm.",
+        action: "{% url 'delete_account' %}",
+        csrf: getCSRF(),
+        fields: [
+          { name: "password", label: "Password", type: "password", required: true },
+          { name: "confirmation", label: "Type DELETE", type: "text", required: true, placeholder: "DELETE" }
+        ],
+        confirmText: "DELETE ACCOUNT",
+        cancelText: "CANCEL",
+        danger: true
+      });
     });
+  }
 });
 </script>
-
 {% endblock %}
