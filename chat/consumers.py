@@ -85,7 +85,12 @@ class PresenceConsumer(AsyncWebsocketConsumer):
             )
 
     async def receive(self, text_data):
-        pass
+        try:
+            data = json.loads(text_data)
+        except (json.JSONDecodeError, TypeError):
+            return
+        if isinstance(data, dict) and data.get("type") == "ping":
+            await self.send(text_data=json.dumps({"type": "pong"}))
 
     async def presence_event(self, event):
         await self.send(text_data=json.dumps({
@@ -111,7 +116,12 @@ class RoomEventConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data):
-        pass
+        try:
+            data = json.loads(text_data)
+        except (json.JSONDecodeError, TypeError):
+            return
+        if isinstance(data, dict) and data.get("type") == "ping":
+            await self.send(text_data=json.dumps({"type": "pong"}))
 
     async def room_event(self, event):
         await self.send(text_data=json.dumps({
@@ -162,10 +172,6 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
         if not user.is_authenticated:
             return
 
-        if not rate_limiter.allow(f"user:{user.pk}"):
-            await self.send_json({"error": "Rate limit exceeded. Slow down."})
-            return
-
         try:
             data = json.loads(text_data)
         except (json.JSONDecodeError, TypeError):
@@ -177,6 +183,14 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
             return
 
         msg_type = data.get("type", "message")
+
+        if msg_type == "ping":
+            await self.send_json({"type": "pong"})
+            return
+
+        if not rate_limiter.allow(f"user:{user.pk}"):
+            await self.send_json({"error": "Rate limit exceeded. Slow down."})
+            return
 
         if msg_type == "typing":
             if self.typing_enabled:

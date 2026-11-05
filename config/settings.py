@@ -77,7 +77,15 @@ if REDIS_URL:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [REDIS_URL],
+                "hosts": [
+                    {
+                        "address": REDIS_URL,
+                        "socket_timeout": 20,
+                        "socket_connect_timeout": 20,
+                    }
+                ],
+                "capacity": 1500,
+                "expiry": 30,
             },
         },
     }
@@ -130,6 +138,7 @@ SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 SECURE_BROWSER_XSS_FILTER = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
@@ -138,6 +147,5 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 CRYPTOGRAPHY_KEY = os.environ.get("CRYPTOGRAPHY_KEY", SECRET_KEY)

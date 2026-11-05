@@ -27,12 +27,6 @@
     {% if request.user.is_authenticated %}
       <a href="{% url 'chat:index' %}" class="topbar-link">CHAT</a>
       <a href="{% url 'account' %}" class="topbar-link">ACCOUNT</a>
-      <form method="post" action="{% url 'logout' %}" class="topbar-logout"
-            data-confirm="Log out?"
-            data-confirm-ok="LOGOUT">
-        {% csrf_token %}
-        <button class="topbar-link">LOGOUT</button>
-      </form>
     {% else %}
       <a href="{% url 'login' %}" class="topbar-link">LOGIN</a>
       <a href="{% url 'register' %}" class="topbar-link">REGISTER</a>

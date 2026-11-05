@@ -1,4 +1,4 @@
-(function() {
+(function () {
   "use strict";
 
   if (!document.body || document.body.dataset.authenticated === "false") {
@@ -12,9 +12,26 @@
   var reconnectDelay = 2000;
   var maxReconnectDelay = 30000;
   var manuallyClosed = false;
+  var heartbeat = null;
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeat = setInterval(function () {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 25000);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+  }
 
   function apply(username, online) {
-    document.querySelectorAll('[data-username="' + username + '"]').forEach(function(el) {
+    document.querySelectorAll('[data-username="' + username + '"]').forEach(function (el) {
       var dot = el.querySelector(".presence");
       if (!dot) return;
       dot.classList.toggle("online", online);
@@ -29,21 +46,23 @@
       return;
     }
 
-    socket.onopen = function() {
+    socket.onopen = function () {
       reconnectDelay = 2000;
+      startHeartbeat();
     };
 
-    socket.onclose = function() {
+    socket.onclose = function () {
+      stopHeartbeat();
       if (manuallyClosed) return;
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
     };
 
-    socket.onerror = function() {
+    socket.onerror = function () {
       if (socket) socket.close();
     };
 
-    socket.onmessage = function(event) {
+    socket.onmessage = function (event) {
       var data;
       try { data = JSON.parse(event.data); } catch (e) { return; }
       if (data.type === "presence") {
@@ -54,8 +73,9 @@
 
   connect();
 
-  window.addEventListener("beforeunload", function() {
+  window.addEventListener("beforeunload", function () {
     manuallyClosed = true;
+    stopHeartbeat();
     if (socket) socket.close();
   });
 })();
