@@ -108,7 +108,7 @@ a {
 .topbar-link {
   color: var(--text);
   text-decoration: none;
-  font-size: 1.1rem;
+  font-size: 0.8rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   background: none;
