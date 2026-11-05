@@ -51,9 +51,15 @@ def _is_ajax(request):
     return request.META.get("HTTP_X_REQUESTED_WITH", "").lower() == "xmlhttprequest"
 
 
-def _push_event(user_ids, event_type, slug="", name="", kind=""):
+def _send(group, payload):
     layer = get_channel_layer()
     if layer is None:
+        return
+    async_to_sync(layer.group_send)(group, payload)
+
+
+def _push_event(user_ids, event_type, slug="", name="", kind=""):
+    if not user_ids:
         return
     payload = {
         "type": "room_event",
@@ -63,7 +69,69 @@ def _push_event(user_ids, event_type, slug="", name="", kind=""):
         "kind": kind,
     }
     for uid in user_ids:
-        async_to_sync(layer.group_send)(f"user_events_{uid}", payload)
+        _send(f"user_events_{uid}", payload)
+
+
+def _push_chat_event(group_name, event_type, msg_id=None, extra=None):
+    if not group_name:
+        return
+    payload = {
+        "type": "chat_event",
+        "event_type": event_type,
+    }
+    if msg_id is not None:
+        payload["id"] = msg_id
+    if extra:
+        payload.update(extra)
+    _send(group_name, payload)
+
+
+def _notify_member_change(room):
+    _push_chat_event(f"privateroom_{room.slug}", "member_change")
+
+
+def _system_public(room, user, text):
+    msg = Message.objects.create(
+        room=room, sender=user, content=text, is_system=True,
+    )
+    _push_chat_event(
+        f"chat_{room.slug}", "system",
+        msg.id,
+        {
+            "username": user.username,
+            "content": text,
+            "created": msg.created.isoformat(),
+            "timestamp": timezone.localtime(msg.created).strftime("%H:%M"),
+            "full_timestamp": timezone.localtime(msg.created).strftime("%d %b %Y %H:%M"),
+        },
+    )
+
+
+def _system_private_room(room, user, text):
+    msg = PrivateRoomMessage.objects.create(
+        room=room, sender=user, content=text, is_system=True,
+    )
+    _push_chat_event(
+        f"privateroom_{room.slug}", "system",
+        msg.id,
+        {
+            "username": user.username,
+            "content": text,
+            "created": msg.created.isoformat(),
+            "timestamp": timezone.localtime(msg.created).strftime("%H:%M"),
+            "full_timestamp": timezone.localtime(msg.created).strftime("%d %b %Y %H:%M"),
+        },
+    )
+
+
+def _group_for_message(kind, obj):
+    if kind == "room":
+        return f"chat_{obj.room.slug}"
+    if kind == "pr":
+        return f"privateroom_{obj.room.slug}"
+    if kind == "pc":
+        return f"private_{obj.chat_id}"
+    return None
 
 
 def _room_snapshot(room, viewer):
@@ -112,6 +180,21 @@ def _touch_private_chat(chat, user):
     )
 
 
+def _cleared_public(room, user):
+    m = ReadMarker.objects.filter(user=user, room=room).first()
+    return m.cleared_at if m and m.cleared_at else None
+
+
+def _cleared_private_room(room, user):
+    m = ReadMarker.objects.filter(user=user, private_room=room).first()
+    return m.cleared_at if m and m.cleared_at else None
+
+
+def _cleared_private_chat(chat, user):
+    m = ReadMarker.objects.filter(user=user, private_chat=chat).first()
+    return m.cleared_at if m and m.cleared_at else None
+
+
 def _unread_count_public(room, user):
     marker = ReadMarker.objects.filter(user=user, room=room).first()
     qs = Message.objects.filter(room=room).exclude(sender=user)
@@ -157,14 +240,13 @@ def _serialize(m):
         "edited": bool(m.edited_at),
         "up": up,
         "down": down,
+        "is_system": getattr(m, "is_system", False),
     }
 
 
 @login_required
 def index(request):
-    my_public_rooms = list(
-        Room.objects.filter(members__user=request.user).distinct()
-    )
+    my_public_rooms = list(Room.objects.filter(members__user=request.user).distinct())
     for r in my_public_rooms:
         r.unread = _unread_count_public(r, request.user)
 
@@ -205,18 +287,20 @@ def room(request, slug):
     room = get_object_or_404(Room, slug=slug)
     PublicRoomMember.objects.get_or_create(room=room, user=request.user)
     _touch_public(room, request.user)
-    qs = _with_reactions(
-        room.messages.select_related("sender")
-        .exclude(sender__in=Block.objects.filter(blocker=request.user).values("blocked"))
-        .order_by("-id")
+    cleared = _cleared_public(room, request.user)
+    base = room.messages.select_related("sender").exclude(
+        sender__in=Block.objects.filter(blocker=request.user).values("blocked")
     )
+    if cleared:
+        base = base.filter(created__gt=cleared)
+    qs = _with_reactions(base.order_by("-id"))
     messages_page = list(qs[:PAGE_SIZE])
     messages_page.reverse()
     has_more = qs.count() > PAGE_SIZE
     my_reactions = dict(
         Reaction.objects.filter(
             user=request.user,
-            room_message__in=[m.id for m in messages_page],
+            room_message__in=[m.id for m in messages_page if not getattr(m, "is_system", False)],
         ).values_list("room_message_id", "value")
     )
     return render(
@@ -234,8 +318,11 @@ def room(request, slug):
 @login_required
 def older_public_messages(request, slug):
     room = get_object_or_404(Room, slug=slug)
+    cleared = _cleared_public(room, request.user)
     before = request.GET.get("before")
     qs = room.messages.select_related("sender").order_by("-id")
+    if cleared:
+        qs = qs.filter(created__gt=cleared)
     if before:
         qs = qs.filter(id__lt=int(before))
     page = list(qs[:PAGE_SIZE])
@@ -251,6 +338,7 @@ def older_public_messages(request, slug):
 def leave_public_room(request, slug):
     room = get_object_or_404(Room, slug=slug)
     PublicRoomMember.objects.filter(room=room, user=request.user).delete()
+    _system_public(room, request.user, "left the room")
     _push_event([request.user.pk], "refresh_index")
     messages.success(request, f"Left #{room.name}.")
     return redirect("chat:index")
@@ -271,7 +359,9 @@ def join_or_create_public_room(request):
         room = Room.objects.create(name=name)
         created = True
 
-    PublicRoomMember.objects.get_or_create(room=room, user=request.user)
+    _, joined = PublicRoomMember.objects.get_or_create(room=room, user=request.user)
+    if joined:
+        _system_public(room, request.user, "joined the room")
     _push_event([request.user.pk], "refresh_index")
     if created:
         messages.success(request, f"Public room #{name} created.")
@@ -287,8 +377,17 @@ def delete_public_history(request, slug):
     if not PublicRoomMember.objects.filter(room=room, user=request.user).exists():
         messages.error(request, "You are not a member of this room.")
         return redirect("chat:index")
-    Message.objects.filter(room=room, sender=request.user).delete()
-    messages.success(request, f"Deleted your messages in #{room.name}.")
+
+    now = timezone.now()
+    marker, _ = ReadMarker.objects.get_or_create(
+        user=request.user, room=room, private_room=None, private_chat=None,
+        defaults={"last_read_at": now},
+    )
+    marker.cleared_at = now
+    marker.save(update_fields=["cleared_at"])
+
+    _push_chat_event(f"chat_{room.slug}", "clear_all")
+    messages.success(request, f"Cleared messages in #{room.name} for you.")
     return redirect("chat:room", slug=room.slug)
 
 
@@ -347,11 +446,13 @@ def private_chat(request, username):
         blocker=other_user, blocked=request.user
     ).exists()
 
-    qs = _with_reactions(
-        chat.messages.select_related("sender")
-        .exclude(sender__in=Block.objects.filter(blocker=request.user).values("blocked"))
-        .order_by("-id")
+    cleared = _cleared_private_chat(chat, request.user)
+    base = chat.messages.select_related("sender").exclude(
+        sender__in=Block.objects.filter(blocker=request.user).values("blocked")
     )
+    if cleared:
+        base = base.filter(created__gt=cleared)
+    qs = _with_reactions(base.order_by("-id"))
     messages_page = list(qs[:PAGE_SIZE])
     messages_page.reverse()
     has_more = qs.count() > PAGE_SIZE
@@ -388,8 +489,11 @@ def older_private_chat_messages(request, username):
     chat = PrivateChat.objects.filter(user1=low, user2=high).first()
     if not chat:
         return JsonResponse({"messages": [], "has_more": False})
+    cleared = _cleared_private_chat(chat, request.user)
     before = request.GET.get("before")
     qs = chat.messages.select_related("sender").order_by("-id")
+    if cleared:
+        qs = qs.filter(created__gt=cleared)
     if before:
         qs = qs.filter(id__lt=int(before))
     page = list(qs[:PAGE_SIZE])
@@ -451,8 +555,17 @@ def delete_private_history(request, username):
     chat = PrivateChat.objects.filter(user1=low, user2=high).first()
     if not chat:
         return redirect("chat:index")
-    PrivateChatMessage.objects.filter(chat=chat, sender=request.user).delete()
-    messages.success(request, f"Deleted your messages with @{other_user.username}.")
+
+    now = timezone.now()
+    marker, _ = ReadMarker.objects.get_or_create(
+        user=request.user, private_chat=chat, room=None, private_room=None,
+        defaults={"last_read_at": now},
+    )
+    marker.cleared_at = now
+    marker.save(update_fields=["cleared_at"])
+
+    _push_chat_event(f"private_{chat.id}", "clear_all")
+    messages.success(request, f"Cleared messages with @{other_user.username} for you.")
     return redirect("chat:private_chat", username=other_user.username)
 
 
@@ -487,19 +600,20 @@ def private_room(request, slug):
 
     _touch_private_room(room, request.user)
 
-    qs = _with_reactions(
-        PrivateRoomMessage.objects.filter(room=room)
-        .select_related("sender")
-        .exclude(sender__in=Block.objects.filter(blocker=request.user).values("blocked"))
-        .order_by("-id")
+    cleared = _cleared_private_room(room, request.user)
+    base = PrivateRoomMessage.objects.filter(room=room).select_related("sender").exclude(
+        sender__in=Block.objects.filter(blocker=request.user).values("blocked")
     )
+    if cleared:
+        base = base.filter(created__gt=cleared)
+    qs = _with_reactions(base.order_by("-id"))
     messages_page = list(qs[:PAGE_SIZE])
     messages_page.reverse()
     has_more = qs.count() > PAGE_SIZE
     my_reactions = dict(
         Reaction.objects.filter(
             user=request.user,
-            private_room_message__in=[m.id for m in messages_page],
+            private_room_message__in=[m.id for m in messages_page if not getattr(m, "is_system", False)],
         ).values_list("private_room_message_id", "value")
     )
 
@@ -528,8 +642,11 @@ def older_private_room_messages(request, slug):
     room = get_object_or_404(PrivateRoom, slug=slug)
     if not PrivateRoomMember.objects.filter(room=room, user=request.user).exists():
         return JsonResponse({"messages": [], "has_more": False})
+    cleared = _cleared_private_room(room, request.user)
     before = request.GET.get("before")
     qs = PrivateRoomMessage.objects.filter(room=room).select_related("sender").order_by("-id")
+    if cleared:
+        qs = qs.filter(created__gt=cleared)
     if before:
         qs = qs.filter(id__lt=int(before))
     page = list(qs[:PAGE_SIZE])
@@ -541,13 +658,26 @@ def older_private_room_messages(request, slug):
 
 
 @login_required
+def room_members_json(request, slug):
+    room = get_object_or_404(PrivateRoom, slug=slug)
+    if not room.membership(request.user):
+        return JsonResponse({"error": "Not a member"}, status=403)
+    return JsonResponse(_room_snapshot(room, request.user))
+
+
+@login_required
 @require_POST
 def leave_private_room(request, slug):
     room = get_object_or_404(PrivateRoom, slug=slug)
     if room.owner_id == request.user.pk:
         messages.error(request, "Owner cannot leave. Delete the room first.")
         return redirect("chat:private_room", slug=room.slug)
-    PrivateRoomMember.objects.filter(room=room, user=request.user).delete()
+
+    member = room.membership(request.user)
+    if member:
+        member.delete()
+    _system_private_room(room, request.user, "left the room")
+    _notify_member_change(room)
     _push_event([request.user.pk], "refresh_index")
     messages.success(request, f"Left #{room.name}.")
     return redirect("chat:index")
@@ -560,8 +690,17 @@ def delete_private_room_history(request, slug):
     if not PrivateRoomMember.objects.filter(room=room, user=request.user).exists():
         messages.error(request, "You are not a member of this room.")
         return redirect("chat:index")
-    PrivateRoomMessage.objects.filter(room=room, sender=request.user).delete()
-    messages.success(request, f"Deleted your messages in #{room.name}.")
+
+    now = timezone.now()
+    marker, _ = ReadMarker.objects.get_or_create(
+        user=request.user, private_room=room, room=None, private_chat=None,
+        defaults={"last_read_at": now},
+    )
+    marker.cleared_at = now
+    marker.save(update_fields=["cleared_at"])
+
+    _push_chat_event(f"privateroom_{room.slug}", "clear_all")
+    messages.success(request, f"Cleared messages in #{room.name} for you.")
     return redirect("chat:private_room", slug=room.slug)
 
 
@@ -573,9 +712,10 @@ def delete_private_room(request, slug):
         messages.error(request, "Only the room owner can delete it.")
         return redirect("chat:private_room", slug=room.slug)
     member_ids = list(room.members.values_list("user_id", flat=True))
+    room_name = room.name
     room.delete()
     _push_event(member_ids, "refresh_index")
-    messages.success(request, f"Deleted #{room.name}.")
+    messages.success(request, f"Deleted #{room_name}.")
     return redirect("chat:index")
 
 
@@ -604,7 +744,7 @@ def toggle_room_lock(request, slug):
 
     room.is_locked = not room.is_locked
     room.save(update_fields=["is_locked"])
-    _push_event(list(room.members.values_list("user_id", flat=True)), "refresh_room", slug=room.slug, name=room.name)
+    _notify_member_change(room)
 
     if _is_ajax(request):
         return JsonResponse(_room_snapshot(room, request.user))
@@ -647,7 +787,7 @@ def mute_member(request, slug, username):
 
     target_m.is_muted = not target_m.is_muted
     target_m.save(update_fields=["is_muted"])
-    _push_event([target.pk], "refresh_room", slug=room.slug, name=room.name)
+    _notify_member_change(room)
 
     if _is_ajax(request):
         return JsonResponse(_room_snapshot(room, request.user))
@@ -692,6 +832,8 @@ def remove_member(request, slug, username):
         room=room, user=target, defaults={"banned_by": request.user}
     )
     target_m.delete()
+    _system_private_room(room, target, "was banned")
+    _notify_member_change(room)
     _push_event([target.pk], "refresh_index")
 
     if _is_ajax(request):
@@ -713,6 +855,7 @@ def unban_member(request, slug, username):
 
     target = get_object_or_404(User, username=username)
     PrivateRoomBan.objects.filter(room=room, user=target).delete()
+    _notify_member_change(room)
     _push_event([target.pk], "refresh_index")
 
     if _is_ajax(request):
@@ -746,7 +889,8 @@ def promote_member(request, slug, username):
 
     target_m.is_admin = True
     target_m.save(update_fields=["is_admin"])
-    _push_event([target.pk], "refresh_index")
+    _notify_member_change(room)
+    _push_event([target.pk], "refresh_room", slug=room.slug, name=room.name)
 
     if _is_ajax(request):
         return JsonResponse(_room_snapshot(room, request.user))
@@ -779,7 +923,8 @@ def demote_member(request, slug, username):
 
     target_m.is_admin = False
     target_m.save(update_fields=["is_admin"])
-    _push_event([target.pk], "refresh_index")
+    _notify_member_change(room)
+    _push_event([target.pk], "refresh_room", slug=room.slug, name=room.name)
 
     if _is_ajax(request):
         return JsonResponse(_room_snapshot(room, request.user))
@@ -798,6 +943,8 @@ def join_via_invite(request, token):
         room=room, user=request.user
     )
     if created:
+        _system_private_room(room, request.user, "joined the room")
+        _notify_member_change(room)
         _push_event([request.user.pk], "refresh_index")
         messages.success(request, f"Joined #{room.name}.")
     return redirect("chat:private_room", slug=room.slug)
@@ -825,6 +972,8 @@ def join_by_link(request):
         room=room, user=request.user
     )
     if created:
+        _system_private_room(room, request.user, "joined the room")
+        _notify_member_change(room)
         _push_event([request.user.pk], "refresh_index")
         messages.success(request, f"Joined #{room.name}.")
     return redirect("chat:private_room", slug=room.slug)
@@ -870,6 +1019,9 @@ def edit_message(request):
     if not obj:
         return JsonResponse({"error": "Not found"}, status=403)
 
+    if getattr(obj, "is_system", False):
+        return JsonResponse({"error": "Cannot edit system messages"}, status=403)
+
     if timezone.now() - obj.created > EDIT_WINDOW:
         return JsonResponse(
             {"error": "Messages can only be edited within 24 hours."},
@@ -879,6 +1031,10 @@ def edit_message(request):
     obj.content = new_content
     obj.edited_at = timezone.now()
     obj.save(update_fields=["content", "edited_at"])
+
+    group = _group_for_message(kind, obj)
+    _push_chat_event(group, "edit", obj.id, {"content": obj.content})
+
     return JsonResponse({"ok": True, "content": obj.content})
 
 
@@ -896,13 +1052,21 @@ def delete_message(request):
     if not obj:
         return JsonResponse({"error": "Not found"}, status=403)
 
+    if getattr(obj, "is_system", False):
+        return JsonResponse({"error": "Cannot delete system messages"}, status=403)
+
     if timezone.now() - obj.created > EDIT_WINDOW:
         return JsonResponse(
             {"error": "Messages can only be deleted within 24 hours."},
             status=403,
         )
 
+    group = _group_for_message(kind, obj)
     obj.delete()
+
+    if group:
+        _push_chat_event(group, "delete", int(msg_id))
+
     return JsonResponse({"ok": True})
 
 
@@ -936,8 +1100,12 @@ def react_message(request):
     if not field or not model:
         return JsonResponse({"error": "Invalid kind"}, status=400)
 
-    if not model.objects.filter(id=msg_id).exists():
+    obj = model.objects.filter(id=msg_id).first()
+    if not obj:
         return JsonResponse({"error": "Message not found"}, status=404)
+
+    if getattr(obj, "is_system", False):
+        return JsonResponse({"error": "Cannot react to system messages"}, status=403)
 
     filter_kwargs = {"user": request.user, field + "_id": msg_id}
     existing = Reaction.objects.filter(**filter_kwargs).first()

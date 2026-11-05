@@ -268,6 +268,7 @@ class ReadMarker(models.Model):
         blank=True,
     )
     last_read_at = models.DateTimeField(default=timezone.now)
+    cleared_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -322,6 +323,7 @@ class Message(models.Model):
         on_delete=models.CASCADE,
     )
     content = encrypt(models.TextField(max_length=4000))
+    is_system = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
 
@@ -344,6 +346,7 @@ class PrivateRoomMessage(models.Model):
         on_delete=models.CASCADE,
     )
     content = encrypt(models.TextField(max_length=4000))
+    is_system = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
 

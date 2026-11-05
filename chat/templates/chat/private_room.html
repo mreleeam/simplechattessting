@@ -19,7 +19,7 @@
 
   <div class="room-actions">
     <form method="post" action="{% url 'chat:delete_private_room_history' room.slug %}" class="inline-action"
-          data-confirm="Delete all YOUR messages in #{{ room.name }}? Other members keep theirs."
+          data-confirm="Clear all messages in #{{ room.name }} for yourself? Other members keep their view."
           data-confirm-ok="CLEAR"
           data-confirm-danger="1">
       {% csrf_token %}
@@ -53,35 +53,6 @@
     <script type="application/json" id="invite-token-data">{"token": "{{ room.invite_token|escapejs }}"}</script>
   {% endif %}
 
-  {% if is_owner or is_admin %}
-    <script type="application/json" id="admin-panel-data">
-      {
-        "slug": "{{ room.slug|escapejs }}",
-        "name": "{{ room.name|escapejs }}",
-        "isOwner": {% if is_owner %}true{% else %}false{% endif %},
-        "isLocked": {% if room.is_locked %}true{% else %}false{% endif %},
-        "ownerId": {{ room.owner_id }},
-        "members": [
-          {% for m in members %}
-            {
-              "username": "{{ m.user.username|escapejs }}",
-              "userId": {{ m.user.pk }},
-              "isAdmin": {% if m.is_admin %}true{% else %}false{% endif %},
-              "isMuted": {% if m.is_muted %}true{% else %}false{% endif %}
-            }{% if not forloop.last %},{% endif %}
-          {% endfor %}
-        ],
-        "banned": [
-          {% for ban in banned_users %}
-            {
-              "username": "{{ ban.user.username|escapejs }}"
-            }{% if not forloop.last %},{% endif %}
-          {% endfor %}
-        ]
-      }
-    </script>
-  {% endif %}
-
   <hr>
 
   <div id="chat-log" class="chat-log"
@@ -95,29 +66,34 @@
       <button type="button" id="load-older-btn" class="load-older-btn">LOAD OLDER MESSAGES</button>
     {% endif %}
     {% for message in chat_messages %}
-      <p data-id="{{ message.id }}" data-kind="pr" data-created="{{ message.created|date:'c' }}">
-        <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
-        <span class="chat-user" style="color: {{ message.sender|user_color }};">{{ message.sender.username }}</span>
-        &gt;
-        <span class="chat-message">{{ message.content }}</span>
-        {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
-        {% with mine=my_reactions|dict_get:message.id %}
-          <span class="chat-reactions" data-id="{{ message.id }}">
-            <button type="button"
-                    class="reaction-btn reaction-up {% if message.up > 0 %}has-count{% endif %} {% if mine == 1 %}active{% endif %}"
-                    data-value="1"
-                    data-count="{{ message.up }}"
-                    title="Thumbs up">👍 <span class="react-count">{{ message.up }}</span></button>
-            <button type="button"
-                    class="reaction-btn reaction-down {% if message.down > 0 %}has-count{% endif %} {% if mine == -1 %}active{% endif %}"
-                    data-value="-1"
-                    data-count="{{ message.down }}"
-                    title="Thumbs down">👎 <span class="react-count">{{ message.down }}</span></button>
-          </span>
-        {% endwith %}
-      </p>
-    {% empty %}
-      <p class="text-muted">No messages yet.</p>
+      {% if message.is_system %}
+        <p class="chat-message-system" data-id="{{ message.id }}" data-kind="pr">
+          <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
+          <span class="chat-system-text">@{{ message.sender.username }} {{ message.content }}</span>
+        </p>
+      {% else %}
+        <p data-id="{{ message.id }}" data-kind="pr" data-created="{{ message.created|date:'c' }}">
+          <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
+          <span class="chat-user" style="color: {{ message.sender|user_color }};">{{ message.sender.username }}</span>
+          &gt;
+          <span class="chat-message">{{ message.content }}</span>
+          {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
+          {% with mine=my_reactions|dict_get:message.id %}
+            <span class="chat-reactions" data-id="{{ message.id }}">
+              <button type="button"
+                      class="reaction-btn reaction-up {% if message.up > 0 %}has-count{% endif %} {% if mine == 1 %}active{% endif %}"
+                      data-value="1"
+                      data-count="{{ message.up }}"
+                      title="Thumbs up">👍 <span class="react-count">{{ message.up }}</span></button>
+              <button type="button"
+                      class="reaction-btn reaction-down {% if message.down > 0 %}has-count{% endif %} {% if mine == -1 %}active{% endif %}"
+                      data-value="-1"
+                      data-count="{{ message.down }}"
+                      title="Thumbs down">👎 <span class="react-count">{{ message.down }}</span></button>
+            </span>
+          {% endwith %}
+        </p>
+      {% endif %}
     {% endfor %}
   </div>
 
@@ -135,6 +111,12 @@
 {% block scripts %}
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+  var SLUG = "{{ room.slug|escapejs }}";
+  var MEMBERS_URL = "{% url 'chat:room_members_json' room.slug %}";
+  var isAdminView = {% if is_owner or is_admin %}true{% else %}false{% endif %};
+  var adminModalOpen = false;
+  var adminModalWrap = null;
+  var currentData = null;
 
   function postAction(url) {
     return fetch(url, {
@@ -147,6 +129,11 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     });
+  }
+
+  function fetchMembers() {
+    return fetch(MEMBERS_URL, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+      .then(function (r) { return r.json(); });
   }
 
   function renderAdminHTML(data) {
@@ -205,22 +192,21 @@ document.addEventListener("DOMContentLoaded", function () {
     return html;
   }
 
-  function wireAdminActions(wrap, data, refresh) {
-    var slug = data.slug;
-
+  function wireAdminActions(wrap) {
     wrap.querySelectorAll(".admin-lock-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        var msg = data.isLocked
-          ? "Unlock the room? Regular members will be able to send again."
-          : "Lock the room? Only admins will be able to send.";
+        var locked = currentData.isLocked;
         confirmModal({
-          title: data.isLocked ? "Unlock room" : "Lock room",
-          message: msg,
-          confirmText: data.isLocked ? "UNLOCK" : "LOCK",
+          title: locked ? "Unlock room" : "Lock room",
+          message: locked
+            ? "Unlock the room? Regular members will be able to send again."
+            : "Lock the room? Only admins will be able to send.",
+          confirmText: locked ? "UNLOCK" : "LOCK",
           onResult: function (ok) {
             if (ok !== true) return;
-            postAction("/chat/pr/" + slug + "/lock/")
-              .then(function (newData) { refresh(newData); })
+            postAction("/chat/pr/" + SLUG + "/lock/")
+              .then(function () { return fetchMembers(); })
+              .then(renderAdminContent)
               .catch(function () { alertify.error("Could not update lock."); });
           }
         });
@@ -229,24 +215,27 @@ document.addEventListener("DOMContentLoaded", function () {
 
     wrap.querySelectorAll(".admin-mute-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        postAction("/chat/pr/" + slug + "/mute/" + encodeURIComponent(btn.dataset.username) + "/")
-          .then(function (newData) { refresh(newData); })
+        postAction("/chat/pr/" + SLUG + "/mute/" + encodeURIComponent(btn.dataset.username) + "/")
+          .then(function () { return fetchMembers(); })
+          .then(renderAdminContent)
           .catch(function () { alertify.error("Could not change mute state."); });
       });
     });
 
     wrap.querySelectorAll(".admin-promote-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        postAction("/chat/pr/" + slug + "/promote/" + encodeURIComponent(btn.dataset.username) + "/")
-          .then(function (newData) { refresh(newData); })
+        postAction("/chat/pr/" + SLUG + "/promote/" + encodeURIComponent(btn.dataset.username) + "/")
+          .then(function () { return fetchMembers(); })
+          .then(renderAdminContent)
           .catch(function () { alertify.error("Could not promote."); });
       });
     });
 
     wrap.querySelectorAll(".admin-demote-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        postAction("/chat/pr/" + slug + "/demote/" + encodeURIComponent(btn.dataset.username) + "/")
-          .then(function (newData) { refresh(newData); })
+        postAction("/chat/pr/" + SLUG + "/demote/" + encodeURIComponent(btn.dataset.username) + "/")
+          .then(function () { return fetchMembers(); })
+          .then(renderAdminContent)
           .catch(function () { alertify.error("Could not demote."); });
       });
     });
@@ -260,8 +249,9 @@ document.addEventListener("DOMContentLoaded", function () {
           danger: true,
           onResult: function (ok) {
             if (ok !== true) return;
-            postAction("/chat/pr/" + slug + "/remove/" + encodeURIComponent(btn.dataset.username) + "/")
-              .then(function (newData) { refresh(newData); })
+            postAction("/chat/pr/" + SLUG + "/remove/" + encodeURIComponent(btn.dataset.username) + "/")
+              .then(function () { return fetchMembers(); })
+              .then(renderAdminContent)
               .catch(function () { alertify.error("Could not ban."); });
           }
         });
@@ -276,8 +266,9 @@ document.addEventListener("DOMContentLoaded", function () {
           confirmText: "UNBAN",
           onResult: function (ok) {
             if (ok !== true) return;
-            postAction("/chat/pr/" + slug + "/unban/" + encodeURIComponent(btn.dataset.username) + "/")
-              .then(function (newData) { refresh(newData); })
+            postAction("/chat/pr/" + SLUG + "/unban/" + encodeURIComponent(btn.dataset.username) + "/")
+              .then(function () { return fetchMembers(); })
+              .then(renderAdminContent)
               .catch(function () { alertify.error("Could not unban."); });
           }
         });
@@ -289,14 +280,14 @@ document.addEventListener("DOMContentLoaded", function () {
       deleteBtn.addEventListener("click", function () {
         confirmModal({
           title: "Delete room",
-          message: "Delete #" + data.name + " permanently for everyone? This cannot be undone.",
+          message: "Delete #{{ room.name|escapejs }} permanently for everyone? This cannot be undone.",
           confirmText: "DELETE",
           danger: true,
           onResult: function (ok) {
             if (ok !== true) return;
             var form = document.createElement("form");
             form.method = "post";
-            form.action = "/chat/pr/" + slug + "/delete/";
+            form.action = "/chat/pr/" + SLUG + "/delete/";
             var csrf = document.createElement("input");
             csrf.type = "hidden";
             csrf.name = "csrfmiddlewaretoken";
@@ -308,6 +299,15 @@ document.addEventListener("DOMContentLoaded", function () {
         });
       });
     }
+  }
+
+  function renderAdminContent(data) {
+    currentData = data;
+    if (!adminModalWrap) return;
+    var content = adminModalWrap.querySelector(".modal-content");
+    if (!content) return;
+    content.innerHTML = renderAdminHTML(data);
+    wireAdminActions(adminModalWrap);
   }
 
   var openTokenBtn = document.getElementById("open-token-btn");
@@ -352,34 +352,33 @@ document.addEventListener("DOMContentLoaded", function () {
   var openAdminBtn = document.getElementById("open-admin-btn");
   if (openAdminBtn) {
     openAdminBtn.addEventListener("click", function () {
-      var dataEl = document.getElementById("admin-panel-data");
-      if (!dataEl) return;
-      var data;
-      try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
-
-      var wrapRef = null;
-
-      function refresh(newData) {
-        data = newData;
-        if (!wrapRef) return;
-        var content = wrapRef.querySelector(".modal-content");
-        if (!content) return;
-        content.innerHTML = renderAdminHTML(newData);
-        wireAdminActions(wrapRef, newData, refresh);
-      }
-
-      contentModal({
-        title: "Room admin",
-        message: "Manage #" + data.name,
-        htmlContent: renderAdminHTML(data),
-        confirmText: null,
-        cancelText: "CLOSE",
-        onOpen: function (wrap) {
-          wrapRef = wrap;
-          wireAdminActions(wrap, data, refresh);
-        }
+      fetchMembers().then(function (data) {
+        currentData = data;
+        contentModal({
+          title: "Room admin",
+          message: "Manage #" + data.name,
+          htmlContent: renderAdminHTML(data),
+          confirmText: null,
+          cancelText: "CLOSE",
+          onOpen: function (wrap) {
+            adminModalOpen = true;
+            adminModalWrap = wrap;
+            wireAdminActions(wrap);
+          },
+          onResult: function () {
+            adminModalOpen = false;
+            adminModalWrap = null;
+          }
+        });
       });
     });
+  }
+
+  if (isAdminView) {
+    window.onMemberChange = function () {
+      if (!adminModalOpen || !adminModalWrap) return;
+      fetchMembers().then(renderAdminContent);
+    };
   }
 });
 </script>

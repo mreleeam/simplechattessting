@@ -52,10 +52,6 @@ def _full_ts(dt):
     return timezone.localtime(dt).strftime("%d %b %Y %H:%M")
 
 
-def user_group(user_id):
-    return f"user_events_{user_id}"
-
-
 class PresenceConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         user = self.scope["user"]
@@ -106,7 +102,7 @@ class RoomEventConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
         self.user = user
-        self.group_name = user_group(user.pk)
+        self.group_name = f"user_events_{user.pk}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
@@ -264,6 +260,7 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
             "up": event.get("up", 0),
             "down": event.get("down", 0),
             "mine": event.get("mine", 0),
+            "is_system": event.get("is_system", False),
         })
 
     async def typing_broadcast(self, event):
@@ -279,6 +276,24 @@ class BaseChatConsumer(AsyncWebsocketConsumer):
             "kind": event["kind"],
             "up": event["up"],
             "down": event["down"],
+        })
+
+    async def chat_event(self, event):
+        await self.send_json({
+            "type": "chat_event",
+            "event_type": event["event_type"],
+            "id": event.get("id"),
+            "content": event.get("content", ""),
+            "username": event.get("username", ""),
+            "created": event.get("created", ""),
+            "timestamp": event.get("timestamp", ""),
+            "full_timestamp": event.get("full_timestamp", ""),
+        })
+
+    async def system_message(self, event):
+        await self.send_json({
+            "type": "system_message",
+            "text": event["text"],
         })
 
     async def send_json(self, payload):
@@ -318,6 +333,7 @@ class ChatConsumer(BaseChatConsumer):
             "up": up,
             "down": down,
             "mine": 0,
+            "is_system": False,
         }, None
 
 
@@ -369,6 +385,7 @@ class PrivateChatConsumer(BaseChatConsumer):
             "up": up,
             "down": down,
             "mine": 0,
+            "is_system": False,
         }, None
 
 
@@ -425,4 +442,5 @@ class PrivateRoomConsumer(BaseChatConsumer):
             "up": up,
             "down": down,
             "mine": 0,
+            "is_system": False,
         }, None

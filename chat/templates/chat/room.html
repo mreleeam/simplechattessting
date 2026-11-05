@@ -26,7 +26,7 @@
       <button class="btn btn-error btn-small">LEAVE</button>
     </form>
     <form method="post" action="{% url 'chat:delete_public_history' room.slug %}" class="inline-action"
-          data-confirm="Delete all YOUR messages in #{{ room.name }}? Other users keep theirs."
+          data-confirm="Clear all messages in #{{ room.name }} for yourself? Other users keep their view."
           data-confirm-ok="CLEAR"
           data-confirm-danger="1">
       {% csrf_token %}
@@ -47,29 +47,34 @@
       <button type="button" id="load-older-btn" class="load-older-btn">LOAD OLDER MESSAGES</button>
     {% endif %}
     {% for message in chat_messages %}
-      <p data-id="{{ message.id }}" data-kind="room" data-created="{{ message.created|date:'c' }}">
-        <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
-        <span class="chat-user" style="color: {{ message.sender|user_color }};">{{ message.sender.username }}</span>
-        &gt;
-        <span class="chat-message">{{ message.content }}</span>
-        {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
-        {% with mine=my_reactions|dict_get:message.id %}
-          <span class="chat-reactions" data-id="{{ message.id }}">
-            <button type="button"
-                    class="reaction-btn reaction-up {% if message.up > 0 %}has-count{% endif %} {% if mine == 1 %}active{% endif %}"
-                    data-value="1"
-                    data-count="{{ message.up }}"
-                    title="Thumbs up">👍 <span class="react-count">{{ message.up }}</span></button>
-            <button type="button"
-                    class="reaction-btn reaction-down {% if message.down > 0 %}has-count{% endif %} {% if mine == -1 %}active{% endif %}"
-                    data-value="-1"
-                    data-count="{{ message.down }}"
-                    title="Thumbs down">👎 <span class="react-count">{{ message.down }}</span></button>
-          </span>
-        {% endwith %}
-      </p>
-    {% empty %}
-      <p class="text-muted">No messages yet.</p>
+      {% if message.is_system %}
+        <p class="chat-message-system" data-id="{{ message.id }}" data-kind="room">
+          <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
+          <span class="chat-system-text">@{{ message.sender.username }} {{ message.content }}</span>
+        </p>
+      {% else %}
+        <p data-id="{{ message.id }}" data-kind="room" data-created="{{ message.created|date:'c' }}">
+          <span class="chat-time" title="{{ message.created|date:'d M Y H:i' }}">{{ message.created|date:"H:i" }}</span>
+          <span class="chat-user" style="color: {{ message.sender|user_color }};">{{ message.sender.username }}</span>
+          &gt;
+          <span class="chat-message">{{ message.content }}</span>
+          {% if message.edited_at %}<span class="chat-edited"> (edited)</span>{% endif %}
+          {% with mine=my_reactions|dict_get:message.id %}
+            <span class="chat-reactions" data-id="{{ message.id }}">
+              <button type="button"
+                      class="reaction-btn reaction-up {% if message.up > 0 %}has-count{% endif %} {% if mine == 1 %}active{% endif %}"
+                      data-value="1"
+                      data-count="{{ message.up }}"
+                      title="Thumbs up">👍 <span class="react-count">{{ message.up }}</span></button>
+              <button type="button"
+                      class="reaction-btn reaction-down {% if message.down > 0 %}has-count{% endif %} {% if mine == -1 %}active{% endif %}"
+                      data-value="-1"
+                      data-count="{{ message.down }}"
+                      title="Thumbs down">👎 <span class="react-count">{{ message.down }}</span></button>
+            </span>
+          {% endwith %}
+        </p>
+      {% endif %}
     {% endfor %}
   </div>
 

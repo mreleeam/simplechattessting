@@ -26,7 +26,7 @@
 
   <div class="room-actions">
     <form method="post" action="{% url 'chat:delete_private_history' other_user.username %}" class="inline-action"
-          data-confirm="Delete all YOUR messages with @{{ other_user.username }}? Their messages stay."
+          data-confirm="Clear all messages with @{{ other_user.username }} for yourself? Their view stays."
           data-confirm-ok="CLEAR"
           data-confirm-danger="1">
       {% csrf_token %}
@@ -100,8 +100,6 @@
           </span>
         {% endwith %}
       </p>
-    {% empty %}
-      <p class="text-muted">No messages yet.</p>
     {% endfor %}
   </div>
 

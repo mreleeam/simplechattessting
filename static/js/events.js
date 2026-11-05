@@ -35,9 +35,10 @@
     socket.onmessage = function (event) {
       var data;
       try { data = JSON.parse(event.data); } catch (e) { return; }
+
       if (data.type === "refresh_index") {
-        if (typeof window.refreshChatIndex === "function") {
-          window.refreshChatIndex();
+        if (window.location.pathname === "/chat/" || window.location.pathname === "/chat") {
+          setTimeout(function () { window.location.reload(); }, 100);
         }
       }
     };

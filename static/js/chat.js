@@ -32,6 +32,7 @@
   const maxReconnectDelay = 30000;
   let manuallyClosed = false;
   let lastTypingSent = 0;
+  let countdownTimer = null;
 
   const typingIndicator = document.getElementById("typing-indicator");
   let typingClearTimer = null;
@@ -42,6 +43,29 @@
     if (!statusEl) return;
     statusEl.textContent = text;
     statusEl.className = cls;
+  }
+
+  function stopCountdown() {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+  }
+
+  function startCountdown(seconds) {
+    stopCountdown();
+    let remaining = seconds;
+    setStatus("RECONNECTING (" + remaining + "s)", "status-disconnected");
+    countdownTimer = setInterval(function () {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+        setStatus("RECONNECTING", "status-disconnected");
+        return;
+      }
+      setStatus("RECONNECTING (" + remaining + "s)", "status-disconnected");
+    }, 1000);
   }
 
   function appendError(msg) {
@@ -76,16 +100,6 @@
     return m ? m[1] : "";
   }
 
-  function setChipState(btn, count, mine) {
-    btn.dataset.count = count;
-    btn.dataset.mine = mine;
-    const span = btn.querySelector(count === 1 ? ".react-up" : ".react-down");
-    const countSpan = btn.querySelector(".react-count");
-    if (countSpan) countSpan.textContent = count;
-    btn.classList.toggle("active", mine === 1 || mine === -1);
-    btn.classList.toggle("has-count", count > 0);
-  }
-
   function buildReactionsBlock(msgId, up, down, mine) {
     const wrap = document.createElement("span");
     wrap.className = "chat-reactions";
@@ -93,25 +107,21 @@
 
     const upBtn = document.createElement("button");
     upBtn.type = "button";
-    upBtn.className = "reaction-btn reaction-up";
+    upBtn.className = "reaction-btn reaction-up" + (mine === 1 ? " active" : "");
+    if (up > 0) upBtn.classList.add("has-count");
     upBtn.dataset.value = "1";
     upBtn.dataset.count = up || 0;
-    upBtn.dataset.mine = mine === 1 ? 1 : 0;
     upBtn.title = "Thumbs up";
     upBtn.innerHTML = '👍 <span class="react-count">' + (up || 0) + '</span>';
-    if (up > 0) upBtn.classList.add("has-count");
-    if (mine === 1) upBtn.classList.add("active");
 
     const downBtn = document.createElement("button");
     downBtn.type = "button";
-    downBtn.className = "reaction-btn reaction-down";
+    downBtn.className = "reaction-btn reaction-down" + (mine === -1 ? " active" : "");
+    if (down > 0) downBtn.classList.add("has-count");
     downBtn.dataset.value = "-1";
     downBtn.dataset.count = down || 0;
-    downBtn.dataset.mine = mine === -1 ? -1 : 0;
     downBtn.title = "Thumbs down";
     downBtn.innerHTML = '👎 <span class="react-count">' + (down || 0) + '</span>';
-    if (down > 0) downBtn.classList.add("has-count");
-    if (mine === -1) downBtn.classList.add("active");
 
     wrap.appendChild(upBtn);
     wrap.appendChild(downBtn);
@@ -205,7 +215,30 @@
     line.appendChild(actions);
   }
 
+  function buildSystemLine(data) {
+    const line = document.createElement("p");
+    line.className = "chat-message-system";
+    line.dataset.id = data.id || "";
+    line.dataset.kind = kind;
+
+    const time = document.createElement("span");
+    time.className = "chat-time";
+    time.textContent = data.timestamp || "";
+    if (data.full_timestamp) time.title = data.full_timestamp;
+
+    const text = document.createElement("span");
+    text.className = "chat-system-text";
+    text.textContent = "@" + (data.username || "") + " " + (data.content || data.message || "");
+
+    line.appendChild(time);
+    line.appendChild(document.createTextNode(" "));
+    line.appendChild(text);
+    return line;
+  }
+
   function buildMessageLine(data) {
+    if (data.is_system) return buildSystemLine(data);
+
     const line = document.createElement("p");
     line.dataset.id = data.id || "";
     line.dataset.kind = kind;
@@ -286,7 +319,9 @@
                 const edited = document.createElement("span");
                 edited.className = "chat-edited";
                 edited.textContent = " (edited)";
-                line.insertBefore(edited, line.querySelector(".chat-message-actions"));
+                const actions = line.querySelector(".chat-message-actions");
+                if (actions) line.insertBefore(edited, actions);
+                else line.appendChild(edited);
               }
             } else {
               appendError(resp.error || "Could not edit message");
@@ -331,11 +366,13 @@
 
   function connect() {
     manuallyClosed = false;
+    stopCountdown();
     setStatus("CONNECTING", "status-disconnected");
     socket = new WebSocket(url);
 
     socket.onopen = function () {
       reconnectDelay = 1000;
+      stopCountdown();
       setStatus("CONNECTED", "status-connected");
       input.disabled = false;
       input.focus();
@@ -344,14 +381,27 @@
     socket.onclose = function (event) {
       input.disabled = true;
       if (manuallyClosed) {
+        stopCountdown();
         setStatus("DISCONNECTED", "status-disconnected");
         return;
       }
-      if (event.code === 4001) { setStatus("NOT AUTHENTICATED", "status-disconnected"); return; }
-      if (event.code === 4003) { setStatus("ACCESS DENIED", "status-disconnected"); return; }
-      if (event.code === 4029) { setStatus("TOO MANY CONNECTIONS", "status-disconnected"); return; }
+      if (event.code === 4001) {
+        stopCountdown();
+        setStatus("NOT AUTHENTICATED", "status-disconnected");
+        return;
+      }
+      if (event.code === 4003) {
+        stopCountdown();
+        setStatus("ACCESS DENIED", "status-disconnected");
+        return;
+      }
+      if (event.code === 4029) {
+        stopCountdown();
+        setStatus("TOO MANY CONNECTIONS", "status-disconnected");
+        return;
+      }
       const secs = Math.round(reconnectDelay / 1000);
-      setStatus("RECONNECTING (" + secs + "s)", "status-disconnected");
+      startCountdown(secs);
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
     };
@@ -379,6 +429,43 @@
 
       if (data.type === "reaction") {
         updateReactionCounts(data.id, data.up, data.down);
+        return;
+      }
+
+      if (data.type === "system_message") {
+        log.appendChild(buildSystemLine({ content: data.text, username: "" }));
+        log.scrollTop = log.scrollHeight;
+        return;
+      }
+
+      if (data.type === "chat_event") {
+        if (data.event_type === "edit") {
+          var editedLine = log.querySelector('p[data-id="' + data.id + '"]');
+          if (editedLine) {
+            var msgEl = editedLine.querySelector(".chat-message");
+            if (msgEl) msgEl.textContent = data.content;
+            if (!editedLine.querySelector(".chat-edited")) {
+              var badge = document.createElement("span");
+              badge.className = "chat-edited";
+              badge.textContent = " (edited)";
+              var actions = editedLine.querySelector(".chat-message-actions");
+              if (actions) editedLine.insertBefore(badge, actions);
+              else editedLine.appendChild(badge);
+            }
+          }
+        } else if (data.event_type === "delete") {
+          var delLine = log.querySelector('p[data-id="' + data.id + '"]');
+          if (delLine) delLine.remove();
+        } else if (data.event_type === "clear_all") {
+          log.innerHTML = "";
+        } else if (data.event_type === "system") {
+          log.appendChild(buildSystemLine(data));
+          log.scrollTop = log.scrollHeight;
+        } else if (data.event_type === "member_change") {
+          if (typeof window.onMemberChange === "function") {
+            window.onMemberChange();
+          }
+        }
         return;
       }
 
