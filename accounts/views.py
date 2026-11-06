@@ -196,7 +196,8 @@ def delete_account_view(request):
         messages.error(request, "Type DELETE to confirm.")
         return redirect("account")
 
+    user = request.user
+    user.delete()
     logout(request)
-    request.user.delete()
     messages.success(request, "Your account has been deleted.")
     return redirect("home")
